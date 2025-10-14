@@ -1,0 +1,30 @@
+[
+  {
+    "id": "1",
+    "username": "admin",
+    "email": "admin@localhost",
+    "password": "$2b$10$.63rP7gyXdTT1l9cys4Ga.8o.5OtZ0tmX7FOKvHS.ifF08YrSaIeC",
+    "isAdmin": true,
+    "level": 6,
+    "xp": 383,
+    "totalPoints": 1700,
+    "xpToNextLevel": 757,
+    "twoFactorEnabled": false,
+    "twoFactorSecret": null,
+    "createdAt": "2025-10-02T22:11:10.846Z"
+  },
+  {
+    "id": "1760382058407",
+    "username": "francescotroian",
+    "email": "",
+    "password": "$2b$10$GHpxn5LMB91KCelIcATA2.M2Owg2HVjtJ1fkrKTze7pDdgnrCCCFW",
+    "isAdmin": true,
+    "level": 1,
+    "xp": 49,
+    "totalPoints": 49,
+    "xpToNextLevel": 100,
+    "twoFactorEnabled": true,
+    "twoFactorSecret": "O45F24ZPOEUUAUTWORZEIUJVEVEVUOBUONLHEL2HGB4TSI2ULBSA",
+    "createdAt": "2025-10-13T19:00:58.531Z"
+  }
+]

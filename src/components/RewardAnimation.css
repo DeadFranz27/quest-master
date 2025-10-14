@@ -1,0 +1,150 @@
+.reward-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.reward-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.level-up-container,
+.xp-gain-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  z-index: 10;
+}
+
+.reward-icon {
+  filter: drop-shadow(0 0 30px rgba(255, 215, 0, 0.8));
+}
+
+.trophy {
+  color: #ffd700;
+  animation: rotate-trophy 2s ease-in-out infinite;
+}
+
+.xp {
+  color: #ffd700;
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
+@keyframes rotate-trophy {
+  0%, 100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.6));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 40px rgba(255, 215, 0, 1));
+    transform: scale(1.1);
+  }
+}
+
+.level-up-text {
+  font-size: 4rem;
+  font-weight: 900;
+  background: linear-gradient(45deg, #ffd700, #ffed4e, #ffd700);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer-text 2s infinite;
+  text-shadow: 0 0 50px rgba(255, 215, 0, 0.5);
+  letter-spacing: 0.2rem;
+}
+
+@keyframes shimmer-text {
+  0%, 100% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 0%;
+  }
+}
+
+.new-level {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.1);
+  padding: 1rem 3rem;
+  border-radius: 20px;
+  border: 3px solid #ffd700;
+  box-shadow: 0 0 50px rgba(255, 215, 0, 0.5);
+}
+
+.xp-amount {
+  font-size: 3rem;
+  font-weight: 900;
+  color: #ffd700;
+  text-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+}
+
+.task-completed {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  opacity: 0.9;
+}
+
+.particle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.star-particle {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+@media (max-width: 768px) {
+  .level-up-text {
+    font-size: 2.5rem;
+  }
+
+  .new-level {
+    font-size: 2rem;
+    padding: 0.75rem 2rem;
+  }
+
+  .xp-amount {
+    font-size: 2rem;
+  }
+
+  .task-completed {
+    font-size: 1.25rem;
+  }
+
+  .reward-icon {
+    width: 50px;
+    height: 50px;
+  }
+}

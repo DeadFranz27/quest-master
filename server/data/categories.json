@@ -1,0 +1,23 @@
+[
+  {
+    "_id": "1760382145683",
+    "userId": "1760382058407",
+    "name": "Personal Projects",
+    "icon": "🔧",
+    "color": "#ef4444"
+  },
+  {
+    "_id": "1760382615771",
+    "userId": "1760382058407",
+    "name": "Lifestyle",
+    "icon": "🏠",
+    "color": "#f97316"
+  },
+  {
+    "_id": "1760472128339",
+    "userId": "1",
+    "name": "Kdnwbosb",
+    "icon": "🏠",
+    "color": "#3b82f6"
+  }
+]
