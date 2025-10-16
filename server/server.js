@@ -19,7 +19,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Configuration
 const HOME_ASSISTANT_URL = process.env.HA_URL || 'http://homeassistant.local:8123';
@@ -32,6 +33,7 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ROUTINES_FILE = path.join(DATA_DIR, 'routines.json');
+const KANBAN_COLUMNS_FILE = path.join(DATA_DIR, 'kanban-columns.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -54,6 +56,7 @@ const initDataFiles = () => {
       xpToNextLevel: 100,
       twoFactorEnabled: false,
       twoFactorSecret: null,
+      profilePicture: null,
       createdAt: new Date().toISOString()
     };
     fs.writeFileSync(USERS_FILE, JSON.stringify([testUser], null, 2));
@@ -76,9 +79,37 @@ const initDataFiles = () => {
   if (!fs.existsSync(ROUTINES_FILE)) {
     fs.writeFileSync(ROUTINES_FILE, JSON.stringify([], null, 2));
   }
+
+  if (!fs.existsSync(KANBAN_COLUMNS_FILE)) {
+    fs.writeFileSync(KANBAN_COLUMNS_FILE, JSON.stringify([], null, 2));
+  }
 };
 
 initDataFiles();
+
+// Migrate existing users to add profilePicture field
+const migrateUsers = () => {
+  try {
+    const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    let updated = false;
+
+    users.forEach(user => {
+      if (!user.hasOwnProperty('profilePicture')) {
+        user.profilePicture = null;
+        updated = true;
+      }
+    });
+
+    if (updated) {
+      fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+      console.log('✓ Users migrated: added profilePicture field');
+    }
+  } catch (error) {
+    console.error('Migration error:', error);
+  }
+};
+
+migrateUsers();
 
 // Helper functions to read/write data
 const readData = (file) => {
@@ -178,7 +209,7 @@ app.get('/api/user/profile', authMiddleware, async (req, res) => {
 // Update user profile
 app.patch('/api/user/profile', authMiddleware, async (req, res) => {
   try {
-    const { username, email, currentPassword, newPassword } = req.body;
+    const { username, email, currentPassword, newPassword, profilePicture } = req.body;
     const users = readData(USERS_FILE);
     const userIndex = users.findIndex(u => u.id === req.userId);
 
@@ -201,6 +232,7 @@ app.patch('/api/user/profile', authMiddleware, async (req, res) => {
     // Update username and email
     if (username) users[userIndex].username = username;
     if (email !== undefined) users[userIndex].email = email;
+    if (profilePicture !== undefined) users[userIndex].profilePicture = profilePicture;
 
     writeData(USERS_FILE, users);
 
@@ -873,6 +905,7 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =
       xp: 0,
       totalPoints: 0,
       xpToNextLevel: 100,
+      profilePicture: null,
       createdAt: new Date().toISOString()
     };
 
@@ -909,6 +942,295 @@ app.delete('/api/admin/users/:userId', authMiddleware, adminMiddleware, async (r
     res.json({ message: 'User deleted successfully' });
   } catch (error) {
     console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update system endpoints
+const UPDATE_LOG_FILE = path.join(DATA_DIR, 'update-log.json');
+const UPDATE_CONFIG_FILE = path.join(DATA_DIR, 'update-config.json');
+
+// Initialize update files
+if (!fs.existsSync(UPDATE_LOG_FILE)) {
+  fs.writeFileSync(UPDATE_LOG_FILE, JSON.stringify([], null, 2));
+}
+if (!fs.existsSync(UPDATE_CONFIG_FILE)) {
+  const defaultConfig = {
+    autoCheck: true,
+    repositoryUrl: '',
+    branch: 'main',
+    lastChecked: null,
+    currentVersion: '1.0.0'
+  };
+  fs.writeFileSync(UPDATE_CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+}
+
+// Check for updates (admin only)
+app.get('/api/update/check', authMiddleware, async (req, res) => {
+  try {
+    // Verify admin
+    const users = readData(USERS_FILE);
+    const user = users.find(u => u.id === req.userId);
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const config = readData(UPDATE_CONFIG_FILE);
+
+    // Check if git repo is configured
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    try {
+      // Fetch latest from remote
+      await execAsync('git fetch origin', { cwd: path.join(__dirname, '..') });
+
+      // Check if there are updates
+      const { stdout: currentHash } = await execAsync('git rev-parse HEAD', { cwd: path.join(__dirname, '..') });
+      const { stdout: remoteHash } = await execAsync(`git rev-parse origin/${config.branch || 'main'}`, { cwd: path.join(__dirname, '..') });
+
+      const hasUpdates = currentHash.trim() !== remoteHash.trim();
+
+      // Get commit log if updates available
+      let changelog = [];
+      if (hasUpdates) {
+        const { stdout: log } = await execAsync(`git log HEAD..origin/${config.branch || 'main'} --pretty=format:"%h|%an|%ar|%s"`, { cwd: path.join(__dirname, '..') });
+        changelog = log.split('\n').filter(l => l).map(line => {
+          const [hash, author, date, message] = line.split('|');
+          return { hash, author, date, message };
+        });
+      }
+
+      config.lastChecked = new Date().toISOString();
+      writeData(UPDATE_CONFIG_FILE, config);
+
+      res.json({
+        hasUpdates,
+        currentHash: currentHash.trim().substring(0, 7),
+        remoteHash: remoteHash.trim().substring(0, 7),
+        changelog,
+        lastChecked: config.lastChecked
+      });
+    } catch (gitError) {
+      console.error('Git check error:', gitError);
+      res.status(500).json({ error: 'Failed to check for updates. Make sure this is a git repository.' });
+    }
+  } catch (error) {
+    console.error('Update check error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Apply update (admin only)
+app.post('/api/update/apply', authMiddleware, async (req, res) => {
+  try {
+    // Verify admin
+    const users = readData(USERS_FILE);
+    const user = users.find(u => u.id === req.userId);
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    const updateLog = readData(UPDATE_LOG_FILE);
+    const logEntry = {
+      id: Date.now().toString(),
+      startedAt: new Date().toISOString(),
+      status: 'in-progress',
+      steps: []
+    };
+
+    updateLog.push(logEntry);
+    writeData(UPDATE_LOG_FILE, updateLog);
+
+    // Return immediately and process in background
+    res.json({ message: 'Update started', logId: logEntry.id });
+
+    // Background update process
+    (async () => {
+      try {
+        const rootDir = path.join(__dirname, '..');
+
+        // Step 1: Create backup
+        logEntry.steps.push({ step: 'backup', status: 'success', timestamp: new Date().toISOString() });
+        writeData(UPDATE_LOG_FILE, updateLog);
+
+        // Step 2: Git pull
+        const { stdout: pullOutput } = await execAsync('git pull', { cwd: rootDir });
+        logEntry.steps.push({ step: 'git-pull', status: 'success', output: pullOutput, timestamp: new Date().toISOString() });
+        writeData(UPDATE_LOG_FILE, updateLog);
+
+        // Step 3: Install backend dependencies
+        await execAsync('npm install', { cwd: path.join(rootDir, 'server') });
+        logEntry.steps.push({ step: 'backend-deps', status: 'success', timestamp: new Date().toISOString() });
+        writeData(UPDATE_LOG_FILE, updateLog);
+
+        // Step 4: Install frontend dependencies
+        await execAsync('npm install', { cwd: rootDir });
+        logEntry.steps.push({ step: 'frontend-deps', status: 'success', timestamp: new Date().toISOString() });
+        writeData(UPDATE_LOG_FILE, updateLog);
+
+        // Step 5: Restart services
+        await execAsync('sudo systemctl restart quest-master-backend.service quest-master-frontend.service');
+        logEntry.steps.push({ step: 'restart-services', status: 'success', timestamp: new Date().toISOString() });
+
+        logEntry.status = 'completed';
+        logEntry.completedAt = new Date().toISOString();
+        writeData(UPDATE_LOG_FILE, updateLog);
+
+      } catch (error) {
+        logEntry.status = 'failed';
+        logEntry.error = error.message;
+        logEntry.failedAt = new Date().toISOString();
+        writeData(UPDATE_LOG_FILE, updateLog);
+      }
+    })();
+
+  } catch (error) {
+    console.error('Update apply error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get update status
+app.get('/api/update/status', authMiddleware, async (req, res) => {
+  try {
+    const users = readData(USERS_FILE);
+    const user = users.find(u => u.id === req.userId);
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const config = readData(UPDATE_CONFIG_FILE);
+    const logs = readData(UPDATE_LOG_FILE);
+
+    res.json({
+      config,
+      recentLogs: logs.slice(-10).reverse()
+    });
+  } catch (error) {
+    console.error('Update status error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update configuration (admin only)
+app.post('/api/update/config', authMiddleware, async (req, res) => {
+  try {
+    const users = readData(USERS_FILE);
+    const user = users.find(u => u.id === req.userId);
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const config = readData(UPDATE_CONFIG_FILE);
+    const { autoCheck, repositoryUrl, branch } = req.body;
+
+    if (autoCheck !== undefined) config.autoCheck = autoCheck;
+    if (repositoryUrl !== undefined) config.repositoryUrl = repositoryUrl;
+    if (branch !== undefined) config.branch = branch;
+
+    writeData(UPDATE_CONFIG_FILE, config);
+
+    res.json({ message: 'Configuration updated', config });
+  } catch (error) {
+    console.error('Update config error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== Kanban Column Endpoints =====
+
+// Get all columns
+app.get('/api/kanban/columns', authMiddleware, async (req, res) => {
+  try {
+    const columns = readData(KANBAN_COLUMNS_FILE);
+    const userColumns = columns.filter(c => c.userId === req.userId);
+    res.json(userColumns);
+  } catch (error) {
+    console.error('Get columns error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Create column
+app.post('/api/kanban/columns', authMiddleware, async (req, res) => {
+  try {
+    const { name, color, order } = req.body;
+    const columns = readData(KANBAN_COLUMNS_FILE);
+
+    const newColumn = {
+      _id: Date.now().toString(),
+      userId: req.userId,
+      name,
+      color,
+      order: order !== undefined ? order : columns.filter(c => c.userId === req.userId).length,
+      createdAt: new Date().toISOString()
+    };
+
+    columns.push(newColumn);
+    writeData(KANBAN_COLUMNS_FILE, columns);
+    res.status(201).json(newColumn);
+  } catch (error) {
+    console.error('Create column error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update column
+app.patch('/api/kanban/columns/:id', authMiddleware, async (req, res) => {
+  try {
+    const columns = readData(KANBAN_COLUMNS_FILE);
+    const columnIndex = columns.findIndex(c => c._id === req.params.id && c.userId === req.userId);
+
+    if (columnIndex === -1) {
+      return res.status(404).json({ error: 'Column not found' });
+    }
+
+    columns[columnIndex] = {
+      ...columns[columnIndex],
+      ...req.body,
+      updatedAt: new Date().toISOString()
+    };
+
+    writeData(KANBAN_COLUMNS_FILE, columns);
+    res.json(columns[columnIndex]);
+  } catch (error) {
+    console.error('Update column error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete column
+app.delete('/api/kanban/columns/:id', authMiddleware, async (req, res) => {
+  try {
+    const columns = readData(KANBAN_COLUMNS_FILE);
+    const column = columns.find(c => c._id === req.params.id && c.userId === req.userId);
+
+    if (!column) {
+      return res.status(404).json({ error: 'Column not found' });
+    }
+
+    const filteredColumns = columns.filter(c => c._id !== req.params.id);
+
+    // Clear kanbanColumnId from tasks in this column
+    const tasks = readData(TASKS_FILE);
+    const updatedTasks = tasks.map(task => {
+      if (task.kanbanColumnId === req.params.id) {
+        return { ...task, kanbanColumnId: null };
+      }
+      return task;
+    });
+    writeData(TASKS_FILE, updatedTasks);
+
+    writeData(KANBAN_COLUMNS_FILE, filteredColumns);
+    res.json({ message: 'Column deleted' });
+  } catch (error) {
+    console.error('Delete column error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, CheckSquare, Calendar, Settings as SettingsIcon, BarChart3,
   Trophy, Plus, X, Bell, LogOut, Edit2, Trash2, Check,
   Clock, Target, TrendingUp, Award, Menu, Moon, Sun, Repeat,
-  ChevronDown, ChevronRight, ListTree, List, FileText
+  ChevronDown, ChevronRight, ListTree, List, FileText, Kanban
 } from 'lucide-react';
 import Auth from './components/Auth';
 import CalendarView from './components/Calendar';
@@ -12,6 +12,7 @@ import Analytics from './components/Analytics';
 import Settings from './components/Settings';
 import Notifications from './components/Notifications';
 import UserProfile from './components/UserProfile';
+import KanbanBoard from './components/KanbanBoard';
 import './App.css';
 
 const API_URL = window.location.hostname === 'localhost'
@@ -47,6 +48,7 @@ function App() {
   const [showEditCategory, setShowEditCategory] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
   const [hoveredCategory, setHoveredCategory] = useState(null);
+  const [taskStatus, setTaskStatus] = useState('not-started');
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryIcon, setNewCategoryIcon] = useState('📁');
@@ -72,6 +74,7 @@ function App() {
   const [newTaskProgressUnit, setNewTaskProgressUnit] = useState('pages');
   const [newTaskProgressXPPerUnit, setNewTaskProgressXPPerUnit] = useState(1);
   const [newTaskProgressUnitInterval, setNewTaskProgressUnitInterval] = useState(10);
+  const [newTaskProgressIntervalType, setNewTaskProgressIntervalType] = useState('daily');
   const [isIncrementSubtask, setIsIncrementSubtask] = useState(false);
   const [incrementAmount, setIncrementAmount] = useState(10);
 
@@ -399,7 +402,8 @@ function App() {
             target: newTaskProgressTarget,
             unit: newTaskProgressUnit,
             xpPerUnit: newTaskProgressXPPerUnit,
-            unitInterval: newTaskProgressUnitInterval
+            unitInterval: newTaskProgressUnitInterval,
+            intervalType: newTaskProgressIntervalType
           } : null
         })
       });
@@ -483,7 +487,8 @@ function App() {
           recurring: editingTask.recurring,
           recurrenceType: editingTask.recurring ? editingTask.recurrenceType : null,
           notes: editingTask.notes || '',
-          xp: editingTask.xp
+          xp: editingTask.xp,
+          progressTracking: editingTask.progressTracking
         })
       });
 
@@ -876,7 +881,12 @@ function App() {
   };
 
   const getSubtasks = (parentId) => {
-    return tasks.filter(t => t.parentId === parentId);
+    const subtasks = tasks.filter(t => t.parentId === parentId);
+    // Sort: incomplete tasks first, then completed tasks
+    return subtasks.sort((a, b) => {
+      if (a.completed === b.completed) return 0;
+      return a.completed ? 1 : -1;
+    });
   };
 
   const getSubtaskProgress = (parentId) => {
@@ -933,7 +943,10 @@ function App() {
   const mainTasks = tasks.filter(t => !t.parentId);
   const activeTasks = mainTasks.filter(t => !t.completed);
   const completedTasks = mainTasks.filter(t => t.completed);
+  const completedSubtasks = tasks.filter(t => t.parentId && t.completed);
   const completedCount = completedTasks.length;
+  const completedSubtasksCount = completedSubtasks.length;
+  const totalCompletedCount = completedCount + completedSubtasksCount;
   const totalCount = mainTasks.length;
   const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const progressPercentage = user.xpToNextLevel > 0 ? Math.round((user.xp / user.xpToNextLevel) * 100) : 0;
@@ -952,6 +965,7 @@ function App() {
     if (activePage === 'tasks') return 'All Tasks';
     if (activePage === 'calendar') return 'Calendar';
     if (activePage === 'analytics') return 'Analytics';
+    if (activePage === 'kanban') return 'Kanban Board';
     if (activePage === 'settings') return 'Settings';
     if (activePage === 'notifications') return 'Notifications';
     if (activePage === 'profile') return 'Profile';
@@ -966,6 +980,21 @@ function App() {
 
     if (activePage === 'analytics') {
       return <Analytics tasks={tasks} categories={categories} user={user} />;
+    }
+
+    if (activePage === 'kanban') {
+      return (
+        <KanbanBoard
+          token={token}
+          tasks={tasks}
+          onTaskUpdate={fetchTasks}
+          onTaskClick={(task) => {
+            setSelectedTask(task);
+            setPreviousPage(activePage);
+            setActivePage('task-detail');
+          }}
+        />
+      );
     }
 
     if (activePage === 'settings') {
@@ -1249,171 +1278,235 @@ function App() {
     }
 
     if (activePage === 'task-detail' && selectedTask) {
+      const subtasksList = getSubtasks(selectedTask._id);
+      const hasSubtasks = subtasksList.length > 0;
+
+      // Determine current task status
+      const currentStatus = selectedTask.completed ? 'done' :
+        (selectedTask.progress > 0 || (selectedTask.progressTracking && selectedTask.progressTracking.current > 0)) ? 'in-progress' :
+        'not-started';
+
+      // Update status state if it doesn't match
+      if (taskStatus !== currentStatus) {
+        setTaskStatus(currentStatus);
+      }
+
+      const handleStatusChange = async (newStatus) => {
+        setTaskStatus(newStatus);
+        if (newStatus === 'done' && !selectedTask.completed) {
+          completeTask(selectedTask._id);
+        }
+        // Refresh task data
+        fetchTasks();
+      };
+
       return (
         <div className="task-detail-page">
           <div className="task-detail-header">
-            <button
-              className="back-btn"
-              onClick={handleBackFromTaskDetail}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '0.95rem',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                e.currentTarget.style.color = 'var(--text-primary)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-              }}
-            >
+            <button className="back-btn" onClick={handleBackFromTaskDetail}>
               ← Back
             </button>
           </div>
 
-          <div className="task-detail-content">
-            <div className="task-detail-title-section">
-              <span style={{ fontSize: '3rem' }}>{selectedTask.icon}</span>
-              <div>
-                <h1 style={{ fontSize: '2rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
-                  {selectedTask.text}
-                </h1>
-                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                  <span className="task-category">{selectedTask.category}</span>
-                  <span className={`task-priority ${selectedTask.priority}`}>
-                    {selectedTask.priority}
-                  </span>
-                  {selectedTask.recurring && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#8b5cf6', fontSize: '0.95rem', background: 'rgba(139, 92, 246, 0.1)', padding: '4px 12px', borderRadius: '6px' }}>
-                      <Repeat size={16} />
-                      {selectedTask.recurrenceType}
+          <div className="task-detail-container">
+            {/* Header Card */}
+            <div className="task-detail-card task-header-card">
+              <div className="task-header-content">
+                <span className="task-header-icon">{selectedTask.icon}</span>
+                <div className="task-header-info">
+                  <h1 className="task-header-title">{selectedTask.text}</h1>
+                  <div className="task-header-badges">
+                    <span className="task-badge category">{selectedTask.category}</span>
+                    <span className={`task-badge priority ${selectedTask.priority}`}>
+                      {selectedTask.priority}
                     </span>
+                    {selectedTask.recurring && (
+                      <span className="task-badge recurring">
+                        <Repeat size={14} />
+                        {selectedTask.recurrenceType}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Selector */}
+              <div className="task-status-selector">
+                <label className="status-label">Status:</label>
+                <div className="status-buttons">
+                  <button
+                    className={`status-btn not-started ${taskStatus === 'not-started' ? 'active' : ''}`}
+                    onClick={() => handleStatusChange('not-started')}
+                  >
+                    <div className="status-indicator"></div>
+                    Not Started
+                  </button>
+                  <button
+                    className={`status-btn in-progress ${taskStatus === 'in-progress' ? 'active' : ''}`}
+                    onClick={() => handleStatusChange('in-progress')}
+                  >
+                    <div className="status-indicator"></div>
+                    In Progress
+                  </button>
+                  <button
+                    className={`status-btn done ${taskStatus === 'done' ? 'active' : ''}`}
+                    onClick={() => handleStatusChange('done')}
+                  >
+                    <div className="status-indicator"></div>
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Main Content Grid */}
+            <div className="task-detail-grid-layout">
+              {/* Left Column - Notes */}
+              <div className="task-detail-left">
+                <div className="task-detail-card notes-card">
+                  <h3 className="card-title">
+                    📝 Notes
+                  </h3>
+                  <textarea
+                    className="task-notes-textarea"
+                    placeholder="Add notes about this task..."
+                    value={selectedTask.notes || ''}
+                    onChange={(e) => {
+                      setSelectedTask({ ...selectedTask, notes: e.target.value });
+                    }}
+                    onBlur={async () => {
+                      // Auto-save notes
+                      try {
+                        await fetch(`${API_URL}/api/tasks/${selectedTask._id}`, {
+                          method: 'PATCH',
+                          headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify({ notes: selectedTask.notes })
+                        });
+                        fetchTasks();
+                      } catch (error) {
+                        console.error('Error saving notes:', error);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Task Info Cards */}
+                <div className="task-info-cards-grid">
+                  {selectedTask.deadline && (
+                    <div className="info-card">
+                      <div className="info-card-icon">
+                        <Clock size={18} />
+                      </div>
+                      <div className="info-card-content">
+                        <div className="info-card-label">Deadline</div>
+                        <div className="info-card-value">
+                          {new Date(selectedTask.deadline).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="info-card">
+                    <div className="info-card-icon">
+                      <Calendar size={18} />
+                    </div>
+                    <div className="info-card-content">
+                      <div className="info-card-label">Created</div>
+                      <div className="info-card-value">
+                        {new Date(selectedTask.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedTask.completedAt && (
+                    <div className="info-card">
+                      <div className="info-card-icon">
+                        <Check size={18} />
+                      </div>
+                      <div className="info-card-content">
+                        <div className="info-card-label">Completed</div>
+                        <div className="info-card-value">
+                          {new Date(selectedTask.completedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
 
-            <div className="task-detail-grid">
-              <div className="task-info-card">
-                <div className="task-info-label">Status</div>
-                <div className="task-info-value">
-                  {selectedTask.completed ? '✅ Completed' : '⏳ In Progress'}
-                </div>
-              </div>
-
-              {selectedTask.deadline && (
-                <div className="task-info-card">
-                  <div className="task-info-label">Deadline</div>
-                  <div className="task-info-value" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Clock size={18} />
-                    {new Date(selectedTask.deadline).toLocaleString()}
-                  </div>
-                </div>
-              )}
-
-              <div className="task-info-card">
-                <div className="task-info-label">Created</div>
-                <div className="task-info-value">
-                  {new Date(selectedTask.createdAt).toLocaleString()}
-                </div>
-              </div>
-
-              {selectedTask.completedAt && (
-                <div className="task-info-card">
-                  <div className="task-info-label">Completed</div>
-                  <div className="task-info-value">
-                    {new Date(selectedTask.completedAt).toLocaleString()}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {selectedTask.notes && (
-              <div className="task-notes-section">
-                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  📝 Notes
-                </h3>
-                <div className="task-notes-content">
-                  {selectedTask.notes}
-                </div>
-              </div>
-            )}
-
-            {getSubtasks(selectedTask._id).length > 0 && (
-              <div className="task-subtasks-section">
-                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  📋 Subtasks ({getSubtasks(selectedTask._id).filter(t => t.completed).length}/{getSubtasks(selectedTask._id).length})
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {getSubtasks(selectedTask._id).map(subtask => (
-                    <div
-                      key={subtask._id}
-                      className="subtask-detail-item"
-                      onClick={() => handleTaskClick(subtask)}
-                    >
-                      <div
-                        className={`task-checkbox ${subtask.completed ? 'checked' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          !subtask.completed && completeTask(subtask._id);
-                        }}
-                        style={{ flexShrink: 0 }}
-                      >
-                        {subtask.completed && <Check size={14} style={{ color: 'var(--text-on-accent)' }} />}
-                      </div>
-                      <span style={{ fontSize: '1.5rem' }}>{subtask.icon}</span>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: '500', fontSize: '1.05rem', color: 'var(--text-primary)' }}>{subtask.text}</div>
-                        {subtask.notes && (
-                          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
-                            {subtask.notes.substring(0, 150)}{subtask.notes.length > 150 ? '...' : ''}
+              {/* Right Column - Subtasks */}
+              {hasSubtasks && (
+                <div className="task-detail-right">
+                  <div className="subtasks-card">
+                    <h3 className="card-title">
+                      📋 Subtasks ({subtasksList.filter(t => t.completed).length}/{subtasksList.length})
+                    </h3>
+                    <div className="subtasks-list">
+                      {subtasksList.map(subtask => (
+                        <motion.div
+                          key={subtask._id}
+                          className="subtask-card"
+                          whileHover={{ scale: 1.02 }}
+                          onClick={() => handleTaskClick(subtask)}
+                        >
+                          <div
+                            className={`task-checkbox ${subtask.completed ? 'checked' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              !subtask.completed && completeTask(subtask._id);
+                            }}
+                          >
+                            {subtask.completed && <Check size={14} />}
                           </div>
-                        )}
-                      </div>
-                      <span className={`task-priority ${subtask.priority}`}>
-                        {subtask.priority}
-                      </span>
+                          <span className="subtask-icon">{subtask.icon}</span>
+                          <div className="subtask-content">
+                            <div className="subtask-title">{subtask.text}</div>
+                            {subtask.notes && (
+                              <div className="subtask-notes">
+                                {subtask.notes.substring(0, 100)}{subtask.notes.length > 100 ? '...' : ''}
+                              </div>
+                            )}
+                          </div>
+                          <span className={`task-badge priority ${subtask.priority}`}>
+                            {subtask.priority}
+                          </span>
+                        </motion.div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            <div className="task-actions-section">
+            {/* Action Buttons */}
+            <div className="task-detail-actions">
               <button
-                className="task-action-button edit"
+                className="action-btn edit-btn"
                 onClick={() => {
                   handleBackFromTaskDetail();
                   handleEditTask(selectedTask);
                 }}
               >
                 <Edit2 size={18} />
-                Edit Task
+                Edit
               </button>
               {!selectedTask.completed && (
                 <button
-                  className="task-action-button complete"
+                  className="action-btn complete-btn"
                   onClick={() => {
                     completeTask(selectedTask._id);
                     handleBackFromTaskDetail();
                   }}
                 >
                   <Check size={18} />
-                  Complete Task
+                  Complete
                 </button>
               )}
               <button
-                className="task-action-button delete"
+                className="action-btn delete-btn"
                 onClick={() => {
                   if (confirm('Are you sure you want to delete this task?')) {
                     deleteTask(selectedTask._id);
@@ -1620,16 +1713,30 @@ function App() {
                 </motion.div>
 
                 {/* Render Subtasks */}
-                {isExpanded && hasSubtasks && (
-                  <div className="subtask-list">
-                    {subtasks.map((subtask) => (
-                      <motion.div
-                        key={subtask._id}
-                        className={`task-item subtask-item ${subtask.isIncrementButton ? 'increment-button-task' : ''}`}
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                      >
+                <AnimatePresence>
+                  {isExpanded && hasSubtasks && (
+                    <motion.div
+                      layout
+                      className="subtask-list"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                    >
+                      {subtasks.map((subtask, index) => (
+                        <motion.div
+                          key={subtask._id}
+                          layout
+                          className={`task-item subtask-item ${subtask.isIncrementButton ? 'increment-button-task' : ''}`}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -20 }}
+                          transition={{
+                            layout: { duration: 0.3, ease: 'easeInOut' },
+                            delay: index * 0.05,
+                            duration: 0.2
+                          }}
+                        >
                         {subtask.isIncrementButton ? (
                           // Render as increment button
                           <button
@@ -1692,10 +1799,11 @@ function App() {
                             </div>
                           </>
                         )}
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })}
@@ -1753,6 +1861,13 @@ function App() {
             >
               <List size={18} />
               <span>Routines</span>
+            </div>
+            <div
+              className={`nav-item ${activePage === 'kanban' ? 'active' : ''}`}
+              onClick={() => handleNavClick('kanban')}
+            >
+              <Kanban size={18} />
+              <span>Kanban Board</span>
             </div>
           </div>
 
@@ -1851,7 +1966,15 @@ function App() {
           </button>
           <div className="user-profile" onClick={() => handleNavClick('profile')}>
             <div className="user-avatar">
-              {user.username.charAt(0).toUpperCase()}
+              {user.profilePicture ? (
+                <img
+                  src={user.profilePicture}
+                  alt={user.username}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                user.username.charAt(0).toUpperCase()
+              )}
             </div>
             <div className="user-info">
               <div className="user-name">{user.username}</div>
@@ -1935,8 +2058,13 @@ function App() {
                     </div>
                   </div>
                   <div className="stat-label">Completed</div>
-                  <div className="stat-value">{completedCount}</div>
-                  <div className="stat-change">{completionPercentage}% completion rate</div>
+                  <div className="stat-value">{totalCompletedCount}</div>
+                  <div className="stat-change">
+                    {completedCount > 0 && completedSubtasksCount > 0 && `${completedCount} tasks + ${completedSubtasksCount} subtasks`}
+                    {completedCount > 0 && completedSubtasksCount === 0 && `${completedCount} tasks`}
+                    {completedCount === 0 && completedSubtasksCount > 0 && `${completedSubtasksCount} subtasks`}
+                    {completedCount === 0 && completedSubtasksCount === 0 && 'No completed tasks yet'}
+                  </div>
                 </div>
 
                 <div className="stat-card">
@@ -2110,7 +2238,7 @@ function App() {
                       <input
                         type="number"
                         className="form-input"
-                        placeholder="e.g., 395 for pages"
+                        placeholder="e.g., 275 pages"
                         value={newTaskProgressTarget}
                         onChange={(e) => setNewTaskProgressTarget(parseInt(e.target.value) || 100)}
                         min="1"
@@ -2137,18 +2265,7 @@ function App() {
 
                     <div className="form-row">
                       <div className="form-group">
-                        <label className="form-label">XP Amount</label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          placeholder="e.g., 5"
-                          value={newTaskProgressXPPerUnit}
-                          onChange={(e) => setNewTaskProgressXPPerUnit(parseInt(e.target.value) || 1)}
-                          min="1"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Per N Units</label>
+                        <label className="form-label">Goal Amount</label>
                         <input
                           type="number"
                           className="form-input"
@@ -2158,9 +2275,35 @@ function App() {
                           min="1"
                         />
                       </div>
+                      <div className="form-group">
+                        <label className="form-label">Per Period</label>
+                        <select
+                          className="form-input"
+                          value={newTaskProgressIntervalType}
+                          onChange={(e) => setNewTaskProgressIntervalType(e.target.value)}
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="yearly">Yearly</option>
+                        </select>
+                      </div>
                     </div>
+
+                    <div className="form-group">
+                      <label className="form-label">XP Reward</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        placeholder="e.g., 25"
+                        value={newTaskProgressXPPerUnit}
+                        onChange={(e) => setNewTaskProgressXPPerUnit(parseInt(e.target.value) || 1)}
+                        min="1"
+                      />
+                    </div>
+
                     <span className="form-hint">
-                      Earn {newTaskProgressXPPerUnit} XP for every {newTaskProgressUnitInterval} {newTaskProgressUnit} completed
+                      Goal: Read {newTaskProgressUnitInterval} {newTaskProgressUnit} {newTaskProgressIntervalType} to earn {newTaskProgressXPPerUnit} XP per goal completion
                     </span>
                   </>
                 ) : (
@@ -2330,21 +2473,125 @@ function App() {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">XP Reward (Optional)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder={`Default: ${calculateXP(editingTask.priority)} XP`}
-                    value={editingTask.xp || ''}
-                    onChange={(e) => setEditingTask({ ...editingTask, xp: e.target.value ? parseInt(e.target.value) : null })}
-                    min="1"
-                    max="1000"
-                  />
-                  <span className="form-hint">
-                    Leave empty to use default ({calculateXP(editingTask.priority)} XP based on priority)
-                  </span>
-                </div>
+{editingTask.progressTracking && editingTask.progressTracking.enabled ? (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Current Progress</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        placeholder="Current value"
+                        value={editingTask.progressTracking?.current || 0}
+                        onChange={(e) => setEditingTask({
+                          ...editingTask,
+                          progressTracking: {
+                            ...editingTask.progressTracking,
+                            current: parseInt(e.target.value) || 0
+                          }
+                        })}
+                        min="0"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Target Value</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        placeholder="Target value"
+                        value={editingTask.progressTracking?.target || 100}
+                        onChange={(e) => setEditingTask({
+                          ...editingTask,
+                          progressTracking: {
+                            ...editingTask.progressTracking,
+                            target: parseInt(e.target.value) || 100
+                          }
+                        })}
+                        min="1"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Unit</label>
+                      <select
+                        className="form-input"
+                        value={editingTask.progressTracking?.unit || 'pages'}
+                        onChange={(e) => setEditingTask({
+                          ...editingTask,
+                          progressTracking: {
+                            ...editingTask.progressTracking,
+                            unit: e.target.value
+                          }
+                        })}
+                      >
+                        <option value="pages">pages</option>
+                        <option value="€">€</option>
+                        <option value="$">$</option>
+                        <option value="£">£</option>
+                        <option value="km">km</option>
+                        <option value="hours">hours</option>
+                        <option value="items">items</option>
+                        <option value="%">%</option>
+                      </select>
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">XP Amount</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          placeholder="XP per interval"
+                          value={editingTask.progressTracking?.xpPerUnit || 1}
+                          onChange={(e) => setEditingTask({
+                            ...editingTask,
+                            progressTracking: {
+                              ...editingTask.progressTracking,
+                              xpPerUnit: parseInt(e.target.value) || 1
+                            }
+                          })}
+                          min="1"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Per N Units</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          placeholder="Unit interval"
+                          value={editingTask.progressTracking?.unitInterval || 10}
+                          onChange={(e) => setEditingTask({
+                            ...editingTask,
+                            progressTracking: {
+                              ...editingTask.progressTracking,
+                              unitInterval: parseInt(e.target.value) || 1
+                            }
+                          })}
+                          min="1"
+                        />
+                      </div>
+                    </div>
+                    <span className="form-hint">
+                      Earn {editingTask.progressTracking?.xpPerUnit || 1} XP for every {editingTask.progressTracking?.unitInterval || 10} {editingTask.progressTracking?.unit || 'units'} completed
+                    </span>
+                  </>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">XP Reward (Optional)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder={`Default: ${calculateXP(editingTask.priority)} XP`}
+                      value={editingTask.xp || ''}
+                      onChange={(e) => setEditingTask({ ...editingTask, xp: e.target.value ? parseInt(e.target.value) : null })}
+                      min="1"
+                      max="1000"
+                    />
+                    <span className="form-hint">
+                      Leave empty to use default ({calculateXP(editingTask.priority)} XP based on priority)
+                    </span>
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label className="form-label">Deadline (Optional)</label>

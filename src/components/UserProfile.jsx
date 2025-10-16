@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   User, Mail, Lock, Save, RefreshCw, Shield, UserPlus,
-  Trash2, CheckCircle, AlertCircle, LogOut, Crown
+  Trash2, CheckCircle, AlertCircle, LogOut, Crown, Camera
 } from 'lucide-react';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:3001'
+  : `http://${window.location.hostname}:3001`;
 
 function UserProfile({ user, token, onLogout, onUpdateUser }) {
   const [activeTab, setActiveTab] = useState('account');
@@ -20,6 +22,7 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [profilePicture, setProfilePicture] = useState(user.profilePicture || null);
 
   // Admin panel
   const [users, setUsers] = useState([]);
@@ -27,6 +30,7 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser();
@@ -46,6 +50,7 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
       if (response.ok) {
         const userData = await response.json();
         setCurrentUser(userData);
+        setProfilePicture(userData.profilePicture || null);
         onUpdateUser(userData);
       }
     } catch (error) {
@@ -67,6 +72,104 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
     }
   };
 
+  const handleProfilePictureChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Check file size (limit to 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setMessage({ type: 'error', text: 'Image must be less than 5MB' });
+        return;
+      }
+
+      // Check file type
+      if (!file.type.startsWith('image/')) {
+        setMessage({ type: 'error', text: 'File must be an image' });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Create an image element to compress
+        const img = new Image();
+        img.onload = () => {
+          // Create canvas to resize image
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+          // Max dimensions
+          const maxWidth = 400;
+          const maxHeight = 400;
+
+          let width = img.width;
+          let height = img.height;
+
+          // Calculate new dimensions while maintaining aspect ratio
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width *= maxHeight / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to base64 with compression (0.8 quality)
+          const compressedImage = canvas.toDataURL('image/jpeg', 0.8);
+          console.log('Original size:', reader.result.length, 'Compressed size:', compressedImage.length);
+          setProfilePicture(compressedImage);
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const confirmRemoveProfilePicture = async () => {
+    setShowRemoveConfirm(false);
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const updateData = {
+        username,
+        email,
+        profilePicture: null
+      };
+
+      const response = await fetch(`${API_URL}/api/user/profile`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateData)
+      });
+
+      if (response.ok) {
+        const updatedUser = await response.json();
+        onUpdateUser(updatedUser);
+        setProfilePicture(null);
+        setMessage({ type: 'success', text: 'Profile picture removed successfully!' });
+        setTimeout(() => setMessage(null), 3000);
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.message || error.error || 'Failed to remove profile picture' });
+      }
+    } catch (error) {
+      console.error('Remove exception:', error);
+      setMessage({ type: 'error', text: `An error occurred: ${error.message}` });
+    }
+
+    setLoading(false);
+  };
+
   const handleUpdateAccount = async () => {
     setLoading(true);
     setMessage(null);
@@ -74,7 +177,8 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
     try {
       const updateData = {
         username,
-        email
+        email,
+        profilePicture
       };
 
       // Only include password if user wants to change it
@@ -93,6 +197,8 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
         updateData.newPassword = newPassword;
       }
 
+      console.log('Updating profile with data:', { ...updateData, profilePicture: updateData.profilePicture ? 'base64-image' : null });
+
       const response = await fetch(`${API_URL}/api/user/profile`, {
         method: 'PATCH',
         headers: {
@@ -102,9 +208,13 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
         body: JSON.stringify(updateData)
       });
 
+      console.log('Response status:', response.status);
+
       if (response.ok) {
         const updatedUser = await response.json();
+        console.log('Updated user:', { ...updatedUser, profilePicture: updatedUser.profilePicture ? 'base64-image' : null });
         onUpdateUser(updatedUser);
+        setProfilePicture(updatedUser.profilePicture || null);
         setSaved(true);
         setMessage({ type: 'success', text: 'Profile updated successfully!' });
         setCurrentPassword('');
@@ -116,10 +226,12 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
         }, 3000);
       } else {
         const error = await response.json();
-        setMessage({ type: 'error', text: error.message || 'Failed to update profile' });
+        console.error('Update error:', error);
+        setMessage({ type: 'error', text: error.message || error.error || 'Failed to update profile' });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'An error occurred while updating profile' });
+      console.error('Update exception:', error);
+      setMessage({ type: 'error', text: `An error occurred while updating profile: ${error.message}` });
     }
 
     setLoading(false);
@@ -283,6 +395,60 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
             </div>
 
             <div className="settings-form">
+              <div className="form-group">
+                <label className="form-label">Profile Picture</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{
+                    position: 'relative',
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '50%',
+                    overflow: 'hidden',
+                    background: profilePicture ? 'transparent' : 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontSize: '32px',
+                    fontWeight: '700'
+                  }}>
+                    {profilePicture ? (
+                      <img
+                        src={profilePicture}
+                        alt="Profile"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      username.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <label className="settings-btn settings-btn-secondary" style={{ cursor: 'pointer' }}>
+                      <Camera size={18} />
+                      <span>Upload Photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleProfilePictureChange}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    {profilePicture && (
+                      <button
+                        className="settings-btn settings-btn-secondary"
+                        onClick={() => setShowRemoveConfirm(true)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                  Recommended: Square image, at least 200x200px, max 5MB
+                </p>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">Username</label>
                 <input
@@ -501,8 +667,21 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
               ) : (
                 users.map(u => (
                   <div key={u.id} className="user-item">
-                    <div className="user-item-avatar">
-                      {u.username.charAt(0).toUpperCase()}
+                    <div className="user-item-avatar" style={{
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {u.profilePicture ? (
+                        <img
+                          src={u.profilePicture}
+                          alt={u.username}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        u.username.charAt(0).toUpperCase()
+                      )}
                     </div>
                     <div className="user-item-info">
                       <div className="user-item-name">
@@ -532,6 +711,82 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
           </div>
         </motion.div>
       )}
+
+      {/* Remove Profile Picture Confirmation Modal */}
+      <AnimatePresence>
+        {showRemoveConfirm && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowRemoveConfirm(false)}
+          >
+            <motion.div
+              className="modal-content settings-card"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: '450px',
+                padding: '0',
+                background: 'var(--card-bg)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '16px',
+                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+              }}
+            >
+              <div style={{
+                padding: '1.5rem',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: 'var(--text-primary)'
+                }}>
+                  Remove Profile Picture
+                </h3>
+              </div>
+              <div style={{ padding: '1.5rem' }}>
+                <p style={{
+                  margin: '0 0 1.5rem 0',
+                  color: 'var(--text-secondary)',
+                  lineHeight: '1.6'
+                }}>
+                  Are you sure you want to remove your profile picture? This action cannot be undone.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button
+                    className="settings-btn settings-btn-secondary"
+                    onClick={() => setShowRemoveConfirm(false)}
+                    disabled={loading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="settings-btn"
+                    style={{ background: '#ef4444' }}
+                    onClick={confirmRemoveProfilePicture}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <RefreshCw size={18} className="spinning" />
+                    ) : (
+                      <>
+                        <Trash2 size={18} />
+                        Remove
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
