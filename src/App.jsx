@@ -13,6 +13,7 @@ import Settings from './components/Settings';
 import Notifications from './components/Notifications';
 import UserProfile from './components/UserProfile';
 import KanbanBoard from './components/KanbanBoard';
+import DailyDigest from './components/DailyDigest';
 import './App.css';
 
 const API_URL = window.location.hostname === 'localhost'
@@ -34,6 +35,8 @@ function App() {
   const [newTaskDeadline, setNewTaskDeadline] = useState('');
   const [newTaskDeadlineDate, setNewTaskDeadlineDate] = useState('');
   const [newTaskDeadlineTime, setNewTaskDeadlineTime] = useState('');
+  const [newTaskStartTime, setNewTaskStartTime] = useState('');
+  const [newTaskDuration, setNewTaskDuration] = useState(60);
   const [newTaskRecurring, setNewTaskRecurring] = useState(false);
   const [newTaskRecurrenceType, setNewTaskRecurrenceType] = useState('daily');
   const [newTaskNotes, setNewTaskNotes] = useState('');
@@ -96,11 +99,29 @@ function App() {
 
   useEffect(() => {
     if (token) {
+      fetchUserProfile();
       fetchTasks();
       fetchCategories();
       fetchRoutines();
     }
   }, [token]);
+
+  const fetchUserProfile = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/user/profile`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+    }
+  };
 
   // Ensure newTaskCategory is always valid when categories change
   useEffect(() => {
@@ -396,6 +417,8 @@ function App() {
           blocksDevice: null,
           progress: 0,
           xp: newTaskXP,
+          startTime: newTaskStartTime || null,
+          duration: newTaskDuration || null,
           progressTracking: newTaskType === 'progress' ? {
             enabled: true,
             current: 0,
@@ -414,6 +437,8 @@ function App() {
         setNewTaskDeadline('');
         setNewTaskDeadlineDate('');
         setNewTaskDeadlineTime('');
+        setNewTaskStartTime('');
+        setNewTaskDuration(60);
         setNewTaskRecurring(false);
         setNewTaskRecurrenceType('daily');
         setNewTaskNotes('');
@@ -488,6 +513,8 @@ function App() {
           recurrenceType: editingTask.recurring ? editingTask.recurrenceType : null,
           notes: editingTask.notes || '',
           xp: editingTask.xp,
+          startTime: editingTask.startTime || null,
+          duration: editingTask.duration || null,
           progressTracking: editingTask.progressTracking
         })
       });
@@ -2021,6 +2048,9 @@ function App() {
         <div className="dashboard-content">
           {activePage === 'dashboard' && (
             <>
+              {/* Daily Digest */}
+              <DailyDigest user={user} />
+
               {/* Level Progress Card */}
               <div className="level-progress-card">
                 <div className="level-header">
@@ -2367,6 +2397,38 @@ function App() {
                   </div>
                 )}
 
+                {(newTaskType === 'deadline' || newTaskType === 'recurring') && (
+                  <div className="form-group">
+                    <label className="form-label">Time Slot (Optional)</label>
+                    <div className="form-row">
+                      <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                        <input
+                          type="time"
+                          className="form-input"
+                          placeholder="Start time"
+                          value={newTaskStartTime}
+                          onChange={(e) => setNewTaskStartTime(e.target.value)}
+                        />
+                        <span className="form-hint" style={{ fontSize: '11px' }}>Start time</span>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                        <input
+                          type="number"
+                          className="form-input"
+                          placeholder="Duration (min)"
+                          value={newTaskDuration}
+                          onChange={(e) => setNewTaskDuration(parseInt(e.target.value) || 60)}
+                          min="5"
+                          max="1440"
+                          step="5"
+                        />
+                        <span className="form-hint" style={{ fontSize: '11px' }}>Duration (minutes)</span>
+                      </div>
+                    </div>
+                    <span className="form-hint">Add time slot to display task in daily calendar view</span>
+                  </div>
+                )}
+
                 <div className="form-group">
                   <label className="form-label">Notes (Optional)</label>
                   <textarea
@@ -2664,6 +2726,38 @@ function App() {
                       <option value="monthly">Monthly</option>
                       <option value="yearly">Yearly</option>
                     </select>
+                  </div>
+                )}
+
+                {editingTask.deadline && (
+                  <div className="form-group">
+                    <label className="form-label">Time Slot (Optional)</label>
+                    <div className="form-row">
+                      <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                        <input
+                          type="time"
+                          className="form-input"
+                          placeholder="Start time"
+                          value={editingTask.startTime || ''}
+                          onChange={(e) => setEditingTask({ ...editingTask, startTime: e.target.value })}
+                        />
+                        <span className="form-hint" style={{ fontSize: '11px' }}>Start time</span>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                        <input
+                          type="number"
+                          className="form-input"
+                          placeholder="Duration (min)"
+                          value={editingTask.duration || 60}
+                          onChange={(e) => setEditingTask({ ...editingTask, duration: parseInt(e.target.value) || 60 })}
+                          min="5"
+                          max="1440"
+                          step="5"
+                        />
+                        <span className="form-hint" style={{ fontSize: '11px' }}>Duration (minutes)</span>
+                      </div>
+                    </div>
+                    <span className="form-hint">Add time slot to display task in daily calendar view</span>
                   </div>
                 )}
 

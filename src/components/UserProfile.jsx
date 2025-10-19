@@ -75,9 +75,9 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
   const handleProfilePictureChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Check file size (limit to 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        setMessage({ type: 'error', text: 'Image must be less than 5MB' });
+      // Check file size (limit to 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setMessage({ type: 'error', text: 'Image must be less than 10MB' });
         return;
       }
 
@@ -87,45 +87,13 @@ function UserProfile({ user, token, onLogout, onUpdateUser }) {
         return;
       }
 
+      // Simply read the file and send to backend for processing
       const reader = new FileReader();
       reader.onloadend = () => {
-        // Create an image element to compress
-        const img = new Image();
-        img.onload = () => {
-          // Create canvas to resize image
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          // Max dimensions
-          const maxWidth = 400;
-          const maxHeight = 400;
-
-          let width = img.width;
-          let height = img.height;
-
-          // Calculate new dimensions while maintaining aspect ratio
-          if (width > height) {
-            if (width > maxWidth) {
-              height *= maxWidth / width;
-              width = maxWidth;
-            }
-          } else {
-            if (height > maxHeight) {
-              width *= maxHeight / height;
-              height = maxHeight;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          ctx.drawImage(img, 0, 0, width, height);
-
-          // Convert to base64 with compression (0.8 quality)
-          const compressedImage = canvas.toDataURL('image/jpeg', 0.8);
-          console.log('Original size:', reader.result.length, 'Compressed size:', compressedImage.length);
-          setProfilePicture(compressedImage);
-        };
-        img.src = reader.result;
+        setProfilePicture(reader.result);
+      };
+      reader.onerror = () => {
+        setMessage({ type: 'error', text: 'Failed to read image file' });
       };
       reader.readAsDataURL(file);
     }

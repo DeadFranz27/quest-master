@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Server, Wifi, Database, Shield, Save, RefreshCw, User, Bell, Download, Trash, Info, Lock, Key } from 'lucide-react';
+import { Server, Wifi, Database, Shield, Save, RefreshCw, User, Bell, Download, Trash, Info, Lock, Key, Upload, Check, X, AlertCircle, Bot, MessageSquare } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const API_URL = window.location.hostname === 'localhost'
@@ -17,6 +17,25 @@ function Settings({ user }) {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // AI API Keys state
+  const [aiApiKeys, setAiApiKeys] = useState({
+    claudeApiKey: '',
+    chatgptApiKey: '',
+    selectedProvider: null
+  });
+  const [aiSaved, setAiSaved] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // Digest preferences state
+  const [digestPreferences, setDigestPreferences] = useState({
+    enabled: true,
+    time: '08:00',
+    frequency: 'daily',
+    customPrompt: ''
+  });
+  const [digestSaved, setDigestSaved] = useState(false);
+  const [digestLoading, setDigestLoading] = useState(false);
+
   // 2FA state
   const [show2FASetup, setShow2FASetup] = useState(false);
   const [qrCode, setQrCode] = useState('');
@@ -25,9 +44,20 @@ function Settings({ user }) {
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [disablePassword, setDisablePassword] = useState('');
 
+  // Update system state
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [applyingUpdate, setApplyingUpdate] = useState(false);
+  const [updateConfig, setUpdateConfig] = useState(null);
+  const [updateLogs, setUpdateLogs] = useState([]);
+
   useEffect(() => {
     loadSettings();
+    loadAiApiKeys();
     setTwoFactorEnabled(user.twoFactorEnabled || false);
+    if (user.isAdmin) {
+      loadUpdateStatus();
+    }
   }, [user]);
 
   const loadSettings = () => {
@@ -35,6 +65,24 @@ function Settings({ user }) {
     const savedSettings = localStorage.getItem('serverSettings');
     if (savedSettings) {
       setSettings(JSON.parse(savedSettings));
+    }
+  };
+
+  const loadAiApiKeys = () => {
+    if (user.aiApiKeys) {
+      setAiApiKeys({
+        claudeApiKey: user.aiApiKeys.claudeApiKey || '',
+        chatgptApiKey: user.aiApiKeys.chatgptApiKey || '',
+        selectedProvider: user.aiApiKeys.selectedProvider || null
+      });
+    }
+    if (user.digestPreferences) {
+      setDigestPreferences({
+        enabled: user.digestPreferences.enabled !== undefined ? user.digestPreferences.enabled : true,
+        time: user.digestPreferences.time || '08:00',
+        frequency: user.digestPreferences.frequency || 'daily',
+        customPrompt: user.digestPreferences.customPrompt || ''
+      });
     }
   };
 
@@ -169,6 +217,153 @@ function Settings({ user }) {
     }
   };
 
+  // AI API Keys functions
+  const handleSaveAiKeys = async () => {
+    setAiLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/user/profile`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ aiApiKeys })
+      });
+
+      if (response.ok) {
+        setAiSaved(true);
+        setTimeout(() => setAiSaved(false), 3000);
+        // Update local user object
+        window.location.reload(); // Simple reload to update user data
+      } else {
+        alert('Failed to save AI API keys');
+      }
+    } catch (error) {
+      console.error('Save AI keys error:', error);
+      alert('Failed to save AI API keys');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Digest preferences functions
+  const handleSaveDigestPrefs = async () => {
+    setDigestLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/user/digest-preferences`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(digestPreferences)
+      });
+
+      if (response.ok) {
+        setDigestSaved(true);
+        setTimeout(() => setDigestSaved(false), 3000);
+        // Update local user object
+        const userData = await response.json();
+        localStorage.setItem('user', JSON.stringify(userData));
+      } else {
+        alert('Failed to save digest preferences');
+      }
+    } catch (error) {
+      console.error('Save digest preferences error:', error);
+      alert('Failed to save digest preferences');
+    } finally {
+      setDigestLoading(false);
+    }
+  };
+
+  const resetToDefaultPrompt = () => {
+    setDigestPreferences({ ...digestPreferences, customPrompt: '' });
+  };
+
+  // Update system functions
+  const loadUpdateStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/update/status`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUpdateConfig(data.config);
+        setUpdateLogs(data.recentLogs);
+      }
+    } catch (error) {
+      console.error('Failed to load update status:', error);
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    setCheckingUpdate(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/update/check`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUpdateStatus(data);
+        if (data.hasUpdates) {
+          alert(`Update available!\nCurrent: ${data.currentHash}\nNew: ${data.remoteHash}\n\nChanges:\n${data.changelog.map(c => `- ${c.message}`).join('\n')}`);
+        } else {
+          alert('You are up to date!');
+        }
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to check for updates');
+      }
+    } catch (error) {
+      console.error('Update check error:', error);
+      alert('Failed to check for updates');
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    if (!confirm('Are you sure you want to apply this update? The server will restart.')) {
+      return;
+    }
+
+    setApplyingUpdate(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/update/apply`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert('Update started! The server will restart in a moment. You may need to refresh the page.');
+        // Poll for update status
+        setTimeout(() => loadUpdateStatus(), 5000);
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to apply update');
+      }
+    } catch (error) {
+      console.error('Update apply error:', error);
+      alert('Failed to apply update');
+    } finally {
+      setApplyingUpdate(false);
+    }
+  };
+
   return (
     <div className="settings-container">
       <motion.div
@@ -232,12 +427,189 @@ function Settings({ user }) {
           </div>
         </motion.div>
 
-        {/* Two-Factor Authentication */}
+        {/* AI Assistant Configuration */}
         <motion.div
           className="settings-card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
+        >
+          <div className="settings-card-header">
+            <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' }}>
+              <Bot size={24} />
+            </div>
+            <div>
+              <h3 className="settings-card-title">AI Assistant</h3>
+              <p className="settings-card-description">Configure Claude or ChatGPT for task insights</p>
+            </div>
+          </div>
+
+          <div className="settings-form">
+            <div className="form-group">
+              <label className="form-label">
+                <Bot size={16} />
+                AI Provider
+              </label>
+              <select
+                className="form-input"
+                value={aiApiKeys.selectedProvider || ''}
+                onChange={(e) => setAiApiKeys({ ...aiApiKeys, selectedProvider: e.target.value || null })}
+              >
+                <option value="">-- Select Provider --</option>
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="chatgpt">ChatGPT (OpenAI)</option>
+              </select>
+              <span className="form-hint">Choose which AI provider to use for task assistance</span>
+            </div>
+
+            {aiApiKeys.selectedProvider === 'claude' && (
+              <div className="form-group">
+                <label className="form-label">
+                  <Key size={16} />
+                  Claude API Key
+                </label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="sk-ant-..."
+                  value={aiApiKeys.claudeApiKey}
+                  onChange={(e) => setAiApiKeys({ ...aiApiKeys, claudeApiKey: e.target.value })}
+                />
+                <span className="form-hint">Get your API key from console.anthropic.com</span>
+              </div>
+            )}
+
+            {aiApiKeys.selectedProvider === 'chatgpt' && (
+              <div className="form-group">
+                <label className="form-label">
+                  <Key size={16} />
+                  ChatGPT API Key
+                </label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="sk-..."
+                  value={aiApiKeys.chatgptApiKey}
+                  onChange={(e) => setAiApiKeys({ ...aiApiKeys, chatgptApiKey: e.target.value })}
+                />
+                <span className="form-hint">Get your API key from platform.openai.com</span>
+              </div>
+            )}
+
+            <button
+              className={`settings-action-btn primary-btn ${aiSaved ? 'saved' : ''}`}
+              onClick={handleSaveAiKeys}
+              disabled={aiLoading || !aiApiKeys.selectedProvider}
+            >
+              {aiLoading ? (
+                <RefreshCw size={18} className="spinning" />
+              ) : aiSaved ? (
+                <>
+                  <Check size={18} />
+                  Saved!
+                </>
+              ) : (
+                <>
+                  <Save size={18} />
+                  Save AI Configuration
+                </>
+              )}
+            </button>
+
+            {aiApiKeys.selectedProvider && (aiApiKeys.claudeApiKey || aiApiKeys.chatgptApiKey) && (
+              <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981' }}>
+                  <MessageSquare size={16} />
+                  <span style={{ fontSize: '14px' }}>AI Assistant enabled! Ask questions about your tasks or generate daily digests.</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+
+        {/* Daily Digest Preferences */}
+        {aiApiKeys.selectedProvider && (aiApiKeys.claudeApiKey || aiApiKeys.chatgptApiKey) && (
+          <motion.div
+            className="settings-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18 }}
+          >
+            <div className="settings-card-header">
+              <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+                <MessageSquare size={24} />
+              </div>
+              <div>
+                <h3 className="settings-card-title">Daily Digest Settings</h3>
+                <p className="settings-card-description">Customize your daily digest prompt</p>
+              </div>
+            </div>
+
+            <div className="settings-form">
+              <div className="form-group">
+                <label className="form-label">
+                  <MessageSquare size={16} />
+                  Custom Prompt (Optional)
+                </label>
+                <textarea
+                  className="form-input"
+                  rows="6"
+                  placeholder="Leave empty to use the default concise format, or write your own prompt to customize how the AI generates your daily digest..."
+                  value={digestPreferences.customPrompt}
+                  onChange={(e) => setDigestPreferences({ ...digestPreferences, customPrompt: e.target.value })}
+                  style={{ fontFamily: 'monospace', fontSize: '13px', resize: 'vertical' }}
+                />
+                <span className="form-hint">
+                  Customize how the AI formats your daily digest. The AI will receive your task data and follow your instructions.
+                  <br />
+                  <strong>Default:</strong> Concise bullet points with Focus, Attention Needed, Progress, and Quick Win sections.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  className={`settings-action-btn primary-btn ${digestSaved ? 'saved' : ''}`}
+                  onClick={handleSaveDigestPrefs}
+                  disabled={digestLoading}
+                  style={{ flex: 1 }}
+                >
+                  {digestLoading ? (
+                    <RefreshCw size={18} className="spinning" />
+                  ) : digestSaved ? (
+                    <>
+                      <Check size={18} />
+                      Saved!
+                    </>
+                  ) : (
+                    <>
+                      <Save size={18} />
+                      Save Preferences
+                    </>
+                  )}
+                </button>
+
+                {digestPreferences.customPrompt && (
+                  <button
+                    className="settings-action-btn"
+                    onClick={resetToDefaultPrompt}
+                    disabled={digestLoading}
+                    title="Reset to default"
+                  >
+                    <RefreshCw size={18} />
+                    Reset to Default
+                  </button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Two-Factor Authentication */}
+        <motion.div
+          className="settings-card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
         >
           <div className="settings-card-header">
             <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
@@ -342,7 +714,7 @@ function Settings({ user }) {
           className="settings-card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
+          transition={{ delay: 0.25 }}
         >
           <div className="settings-card-header">
             <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #41bfd9 0%, #38a8c5 100%)' }}>
@@ -437,12 +809,102 @@ function Settings({ user }) {
           </div>
         </motion.div>
 
+        {/* System Updates (Admin Only) */}
+        {user.isAdmin && (
+          <motion.div
+            className="settings-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+          >
+            <div className="settings-card-header">
+              <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+                <Upload size={24} />
+              </div>
+              <div>
+                <h3 className="settings-card-title">System Updates</h3>
+                <p className="settings-card-description">Check and apply system updates</p>
+              </div>
+            </div>
+
+            <div className="settings-form">
+              {updateStatus && (
+                <div className={`update-status-box ${updateStatus.hasUpdates ? 'has-updates' : 'up-to-date'}`}>
+                  {updateStatus.hasUpdates ? (
+                    <>
+                      <AlertCircle size={20} />
+                      <div>
+                        <strong>Update Available</strong>
+                        <p>Current: {updateStatus.currentHash} → New: {updateStatus.remoteHash}</p>
+                        {updateStatus.changelog && updateStatus.changelog.length > 0 && (
+                          <div className="changelog">
+                            <strong>Changes:</strong>
+                            <ul>
+                              {updateStatus.changelog.slice(0, 3).map((commit, idx) => (
+                                <li key={idx}>{commit.message}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={20} />
+                      <span>System is up to date</span>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="settings-button-group">
+                <button
+                  className="settings-action-btn primary-btn"
+                  onClick={handleCheckForUpdates}
+                  disabled={checkingUpdate}
+                >
+                  <RefreshCw size={18} className={checkingUpdate ? 'spinning' : ''} />
+                  {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+                </button>
+
+                {updateStatus?.hasUpdates && (
+                  <button
+                    className="settings-action-btn success-btn"
+                    onClick={handleApplyUpdate}
+                    disabled={applyingUpdate}
+                  >
+                    <Upload size={18} />
+                    {applyingUpdate ? 'Updating...' : 'Apply Update'}
+                  </button>
+                )}
+              </div>
+
+              {updateLogs && updateLogs.length > 0 && (
+                <div className="update-logs">
+                  <strong>Recent Updates:</strong>
+                  {updateLogs.slice(0, 3).map((log) => (
+                    <div key={log.id} className={`update-log-entry ${log.status}`}>
+                      <span className="log-date">{new Date(log.startedAt).toLocaleDateString()}</span>
+                      <span className={`log-status ${log.status}`}>
+                        {log.status === 'completed' && <Check size={14} />}
+                        {log.status === 'failed' && <X size={14} />}
+                        {log.status === 'in-progress' && <RefreshCw size={14} className="spinning" />}
+                        {log.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
         {/* Data Management */}
         <motion.div
           className="settings-card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
+          transition={{ delay: user.isAdmin ? 0.4 : 0.35 }}
         >
           <div className="settings-card-header">
             <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)' }}>
@@ -471,7 +933,7 @@ function Settings({ user }) {
           className="settings-card settings-info-card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
+          transition={{ delay: user.isAdmin ? 0.45 : 0.4 }}
         >
           <div className="settings-card-header">
             <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)' }}>
@@ -498,7 +960,7 @@ function Settings({ user }) {
         className="settings-actions"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.6 }}
+        transition={{ delay: user.isAdmin ? 0.5 : 0.45 }}
       >
         <button className="settings-btn settings-btn-secondary" onClick={handleReset}>
           <RefreshCw size={18} />

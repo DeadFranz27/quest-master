@@ -1,0 +1,20 @@
+[Unit]
+Description=Quest Master Frontend Server
+After=network.target quest-master-backend.service
+Wants=quest-master-backend.service
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/quest-master
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-http-header-size=16384
+ExecStart=/usr/bin/npm run dev
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quest-master-frontend
+
+[Install]
+WantedBy=multi-user.target

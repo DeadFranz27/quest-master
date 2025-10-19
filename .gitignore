@@ -12,6 +12,17 @@ dist
 dist-ssr
 *.local
 
+# User data and runtime files (contains sensitive information)
+server/data/*.json
+!server/data/.gitkeep
+
+# Environment files
+server/.env
+
+# APNs certificates
+server/*.p8
+server/*.pem
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

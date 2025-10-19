@@ -53,10 +53,122 @@ function Calendar({ tasks }) {
     return days;
   };
 
+  const getProgressGoalsForDate = (date) => {
+    if (!date) return [];
+    const progressTasks = tasks.filter(task =>
+      task.progressTracking &&
+      task.progressTracking.enabled &&
+      !task.completed &&
+      task.progressTracking.current < task.progressTracking.target
+    );
+
+    const goals = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    progressTasks.forEach(task => {
+      const { intervalType, unitInterval, unit, current, target } = task.progressTracking;
+
+      // Calculate remaining units and periods needed
+      const remaining = target - current;
+      const periodsNeeded = Math.ceil(remaining / unitInterval);
+
+      // Only show goals for today or future dates, but not past
+      if (date < today) return;
+
+      let periodsSinceToday = 0;
+
+      // Calculate how many periods have passed since today
+      if (intervalType === 'daily') {
+        const diffTime = date.getTime() - today.getTime();
+        periodsSinceToday = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      } else if (intervalType === 'weekly') {
+        // Only show on Mondays
+        if (date.getDay() !== 1) return;
+
+        const diffTime = date.getTime() - today.getTime();
+        const daysSince = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        periodsSinceToday = Math.floor(daysSince / 7);
+      } else if (intervalType === 'monthly') {
+        // Only show on 1st of month
+        if (date.getDate() !== 1) return;
+
+        const monthsDiff = (date.getFullYear() - today.getFullYear()) * 12 + (date.getMonth() - today.getMonth());
+        periodsSinceToday = monthsDiff;
+      } else if (intervalType === 'yearly') {
+        // Only show on January 1st
+        if (date.getMonth() !== 0 || date.getDate() !== 1) return;
+
+        periodsSinceToday = date.getFullYear() - today.getFullYear();
+      }
+
+      // Only show the goal if this date is within the calculated periods needed
+      if (periodsSinceToday >= 0 && periodsSinceToday < periodsNeeded) {
+        goals.push({
+          ...task,
+          isProgressGoal: true,
+          goalAmount: unitInterval,
+          goalUnit: unit
+        });
+      }
+    });
+
+    return goals;
+  };
+
+  const getRecurringTasksForDate = (date) => {
+    if (!date) return [];
+
+    const recurringTasks = tasks.filter(task =>
+      task.recurring &&
+      task.recurrenceType &&
+      !task.completed &&
+      task.deadline
+    );
+
+    const tasksForDate = [];
+
+    recurringTasks.forEach(task => {
+      const taskStartDate = new Date(task.deadline);
+      taskStartDate.setHours(0, 0, 0, 0);
+
+      // Only show recurring tasks on or after their start date
+      if (date < taskStartDate) return;
+
+      let shouldShow = false;
+
+      if (task.recurrenceType === 'daily') {
+        shouldShow = true;
+      } else if (task.recurrenceType === 'weekly') {
+        // Show on the same day of week as the start date
+        shouldShow = date.getDay() === taskStartDate.getDay();
+      } else if (task.recurrenceType === 'monthly') {
+        // Show on the same day of month as the start date
+        shouldShow = date.getDate() === taskStartDate.getDate();
+      } else if (task.recurrenceType === 'yearly') {
+        // Show on the same month and day as the start date
+        shouldShow = date.getMonth() === taskStartDate.getMonth() &&
+                     date.getDate() === taskStartDate.getDate();
+      }
+
+      if (shouldShow) {
+        tasksForDate.push({
+          ...task,
+          isRecurring: true
+        });
+      }
+    });
+
+    return tasksForDate;
+  };
+
   const getTasksForDate = (date, includeCompleted = false) => {
     if (!date) return [];
-    return tasks.filter(task => {
+
+    // Get regular deadline tasks
+    const deadlineTasks = tasks.filter(task => {
       if (!task.deadline) return false;
+      if (task.recurring) return false; // Don't show recurring tasks as regular deadlines
       if (!includeCompleted && task.completed) return false;
       const taskDate = new Date(task.deadline);
       return (
@@ -65,6 +177,14 @@ function Calendar({ tasks }) {
         taskDate.getFullYear() === date.getFullYear()
       );
     });
+
+    // Get progress goals for this date
+    const progressGoals = getProgressGoalsForDate(date);
+
+    // Get recurring tasks for this date
+    const recurringTasks = getRecurringTasksForDate(date);
+
+    return [...deadlineTasks, ...progressGoals, ...recurringTasks];
   };
 
   const isSameDate = (date1, date2) => {
@@ -136,21 +256,41 @@ function Calendar({ tasks }) {
                 <>
                   <div className="calendar-date">{day.getDate()}</div>
                   <div className="calendar-tasks">
-                    {dayTasks.slice(0, 3).map(task => (
+                    {dayTasks.filter(t => !t.isProgressGoal && !t.isRecurring).slice(0, 3).map(task => (
                       <div
                         key={task._id}
                         className={`calendar-task ${task.priority} ${task.completed ? 'completed' : ''}`}
                         title={task.text}
+                        style={task.category?.color ? { backgroundColor: `${task.category.color}15`, borderLeftColor: task.category.color } : {}}
                       >
                         <span className="calendar-task-icon">{task.icon}</span>
                         <span className="calendar-task-text">{task.text}</span>
                       </div>
                     ))}
-                    {dayTasks.length > 3 && (
-                      <div className="calendar-task-more">
-                        +{dayTasks.length - 3} more
-                      </div>
-                    )}
+                  </div>
+                  <div className="calendar-recurring-tasks">
+                    {dayTasks.filter(t => t.isProgressGoal || t.isRecurring).map(task => {
+                      const bgColor = task.isProgressGoal
+                        ? 'rgba(139, 92, 246, 0.1)'
+                        : (task.category?.color ? `${task.category.color}15` : 'var(--card-bg)');
+                      const borderColor = task.isProgressGoal
+                        ? '#8b5cf6'
+                        : (task.category?.color || 'var(--primary)');
+
+                      return (
+                        <div
+                          key={task._id}
+                          className={`calendar-task-compact ${task.completed ? 'completed' : ''}`}
+                          title={task.isProgressGoal ? `Goal: ${task.goalAmount} ${task.goalUnit}` : task.text}
+                          style={{ backgroundColor: bgColor, borderLeftColor: borderColor }}
+                        >
+                          <span className="calendar-task-icon">{task.icon}</span>
+                          {task.completed && (
+                            <span className="calendar-task-check">✓</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               )}
@@ -267,7 +407,7 @@ function Calendar({ tasks }) {
 
       {view === 'month' ? renderMonthView() : renderWeekView()}
 
-      {/* Day Detail Modal */}
+      {/* Daily View Modal with Hourly Time Slots */}
       <AnimatePresence>
         {selectedDate && (
           <motion.div
@@ -278,7 +418,7 @@ function Calendar({ tasks }) {
             onClick={() => setSelectedDate(null)}
           >
             <motion.div
-              className="calendar-day-modal"
+              className="calendar-daily-view"
               initial={{ scale: 0.9, y: 50 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 50 }}
@@ -293,49 +433,103 @@ function Calendar({ tasks }) {
                 </button>
               </div>
 
-              <div className="calendar-day-tasks">
-                {getTasksForDate(selectedDate, true).length === 0 ? (
-                  <div className="calendar-day-empty">
-                    No tasks scheduled for this day
-                  </div>
-                ) : (
-                  getTasksForDate(selectedDate, true).map(task => (
-                    <div
-                      key={task._id}
-                      className={`calendar-day-task ${task.priority} ${task.completed ? 'completed' : ''}`}
-                    >
-                      <div className="calendar-day-task-icon">{task.icon}</div>
-                      <div className="calendar-day-task-content">
-                        <div className="calendar-day-task-title">{task.text}</div>
-                        <div className="calendar-day-task-meta">
-                          <span className={`calendar-day-task-priority ${task.priority}`}>
-                            {task.priority}
-                          </span>
-                          {task.category && (
-                            <span className="calendar-day-task-category">
-                              {task.category}
-                            </span>
-                          )}
-                          {task.deadline && (
-                            <span className="calendar-day-task-time">
-                              <Clock size={14} />
-                              {new Date(task.deadline).toLocaleTimeString('en-US', {
-                                hour: 'numeric',
-                                minute: '2-digit',
-                                hour12: true
-                              })}
-                            </span>
-                          )}
+              <div className="daily-view-container">
+                <div className="daily-view-timeline">
+                  {Array.from({ length: 24 }, (_, hour) => {
+                    const dayTasks = getTasksForDate(selectedDate, true);
+                    const hourTasks = dayTasks.filter(task => {
+                      if (!task.startTime) return false;
+                      const taskHour = parseInt(task.startTime.split(':')[0]);
+                      return taskHour === hour;
+                    });
+
+                    return (
+                      <div key={hour} className="daily-view-hour-row">
+                        <div className="daily-view-time-label">
+                          {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
+                        </div>
+                        <div className="daily-view-hour-content">
+                          {hourTasks.map(task => {
+                            const duration = task.duration || 60; // default 1 hour
+                            const startMinute = task.startTime ? parseInt(task.startTime.split(':')[1]) : 0;
+                            const height = (duration / 60) * 60; // 60px per hour
+                            const topOffset = (startMinute / 60) * 60;
+
+                            return (
+                              <motion.div
+                                key={task._id}
+                                className={`daily-view-task ${task.priority} ${task.completed ? 'completed' : ''}`}
+                                style={{
+                                  height: `${height}px`,
+                                  top: `${topOffset}px`,
+                                  backgroundColor: task.category?.color || task.categoryColor || '#6366f1',
+                                  borderLeftColor: task.category?.color || task.categoryColor || '#6366f1'
+                                }}
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                whileHover={{ scale: 1.02, zIndex: 10 }}
+                              >
+                                <div className="daily-view-task-header">
+                                  <span className="daily-view-task-icon">{task.icon}</span>
+                                  <span className="daily-view-task-time">
+                                    {task.startTime} ({duration} min)
+                                  </span>
+                                </div>
+                                <div className="daily-view-task-title">{task.text}</div>
+                                {task.category && (
+                                  <div className="daily-view-task-category">{task.category}</div>
+                                )}
+                                {task.completed && (
+                                  <div className="daily-view-task-completed">✓</div>
+                                )}
+                              </motion.div>
+                            );
+                          })}
                         </div>
                       </div>
-                      {task.completed && (
-                        <div className="calendar-day-task-completed-badge">
-                          ✓ Completed
+                    );
+                  })}
+                </div>
+
+                {/* Tasks without time slots */}
+                {(() => {
+                  const dayTasks = getTasksForDate(selectedDate, true);
+                  const unscheduledTasks = dayTasks.filter(task => !task.startTime);
+
+                  if (unscheduledTasks.length === 0) return null;
+
+                  return (
+                    <div className="daily-view-unscheduled">
+                      <h3 className="daily-view-unscheduled-title">Unscheduled Tasks</h3>
+                      {unscheduledTasks.map(task => (
+                        <div
+                          key={task._id}
+                          className={`calendar-day-task ${task.priority} ${task.completed ? 'completed' : ''}`}
+                        >
+                          <div className="calendar-day-task-icon">{task.icon}</div>
+                          <div className="calendar-day-task-content">
+                            <div className="calendar-day-task-title">{task.text}</div>
+                            <div className="calendar-day-task-meta">
+                              <span className={`calendar-day-task-priority ${task.priority}`}>
+                                {task.priority}
+                              </span>
+                              {task.category && (
+                                <span className="calendar-day-task-category">
+                                  {task.category}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {task.completed && (
+                            <div className="calendar-day-task-completed-badge">
+                              ✓ Completed
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
-                  ))
-                )}
+                  );
+                })()}
               </div>
             </motion.div>
           </motion.div>

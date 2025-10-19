@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
+import { createCanvas, loadImage } from 'canvas';
 
 dotenv.config();
 
@@ -34,6 +35,7 @@ const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ROUTINES_FILE = path.join(DATA_DIR, 'routines.json');
 const KANBAN_COLUMNS_FILE = path.join(DATA_DIR, 'kanban-columns.json');
+const DIGESTS_FILE = path.join(DATA_DIR, 'digests.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -83,11 +85,15 @@ const initDataFiles = () => {
   if (!fs.existsSync(KANBAN_COLUMNS_FILE)) {
     fs.writeFileSync(KANBAN_COLUMNS_FILE, JSON.stringify([], null, 2));
   }
+
+  if (!fs.existsSync(DIGESTS_FILE)) {
+    fs.writeFileSync(DIGESTS_FILE, JSON.stringify([], null, 2));
+  }
 };
 
 initDataFiles();
 
-// Migrate existing users to add profilePicture field
+// Migrate existing users to add profilePicture and aiApiKeys fields
 const migrateUsers = () => {
   try {
     const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
@@ -98,11 +104,33 @@ const migrateUsers = () => {
         user.profilePicture = null;
         updated = true;
       }
+      if (!user.hasOwnProperty('aiApiKeys')) {
+        user.aiApiKeys = {
+          claudeApiKey: null,
+          chatgptApiKey: null,
+          selectedProvider: null // 'claude' or 'chatgpt'
+        };
+        updated = true;
+      }
+      if (!user.hasOwnProperty('digestPreferences')) {
+        user.digestPreferences = {
+          enabled: true,
+          time: '08:00', // 8 AM default
+          frequency: 'daily', // 'daily' or 'twice-daily'
+          customPrompt: null // User can customize the AI prompt
+        };
+        updated = true;
+      }
+      // Add customPrompt field to existing digestPreferences
+      if (user.digestPreferences && !user.digestPreferences.hasOwnProperty('customPrompt')) {
+        user.digestPreferences.customPrompt = null;
+        updated = true;
+      }
     });
 
     if (updated) {
       fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-      console.log('✓ Users migrated: added profilePicture field');
+      console.log('✓ Users migrated: added profilePicture and aiApiKeys fields');
     }
   } catch (error) {
     console.error('Migration error:', error);
@@ -110,6 +138,57 @@ const migrateUsers = () => {
 };
 
 migrateUsers();
+
+// Image processing function
+const processProfilePicture = async (imageData) => {
+  try {
+    // Remove data URI prefix if present
+    let base64Data = imageData;
+    if (imageData.includes('base64,')) {
+      base64Data = imageData.split('base64,')[1];
+    }
+
+    // Convert base64 to buffer
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Load the image
+    const img = await loadImage(buffer);
+
+    // Target size for profile pictures (square)
+    const targetSize = 400;
+
+    // Calculate dimensions to create a square crop from center
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceSize = Math.min(img.width, img.height);
+
+    // Center the crop
+    if (img.width > img.height) {
+      sourceX = (img.width - img.height) / 2;
+    } else {
+      sourceY = (img.height - img.width) / 2;
+    }
+
+    // Create canvas
+    const canvas = createCanvas(targetSize, targetSize);
+    const ctx = canvas.getContext('2d');
+
+    // Draw the cropped and resized image
+    ctx.drawImage(
+      img,
+      sourceX, sourceY, sourceSize, sourceSize, // Source rectangle (crop)
+      0, 0, targetSize, targetSize // Destination rectangle (resize)
+    );
+
+    // Convert to JPEG with compression (0.85 quality)
+    const processedImage = canvas.toDataURL('image/jpeg', 0.85);
+
+    return processedImage;
+  } catch (error) {
+    console.error('Image processing error:', error);
+    throw new Error('Failed to process image');
+  }
+};
 
 // Helper functions to read/write data
 const readData = (file) => {
@@ -209,7 +288,7 @@ app.get('/api/user/profile', authMiddleware, async (req, res) => {
 // Update user profile
 app.patch('/api/user/profile', authMiddleware, async (req, res) => {
   try {
-    const { username, email, currentPassword, newPassword, profilePicture } = req.body;
+    const { username, email, currentPassword, newPassword, profilePicture, aiApiKeys } = req.body;
     const users = readData(USERS_FILE);
     const userIndex = users.findIndex(u => u.id === req.userId);
 
@@ -232,7 +311,26 @@ app.patch('/api/user/profile', authMiddleware, async (req, res) => {
     // Update username and email
     if (username) users[userIndex].username = username;
     if (email !== undefined) users[userIndex].email = email;
-    if (profilePicture !== undefined) users[userIndex].profilePicture = profilePicture;
+
+    // Handle AI API keys
+    if (aiApiKeys !== undefined) {
+      users[userIndex].aiApiKeys = aiApiKeys;
+    }
+
+    // Handle profile picture - process and normalize
+    if (profilePicture !== undefined) {
+      if (profilePicture === null || profilePicture === '') {
+        users[userIndex].profilePicture = null;
+      } else {
+        try {
+          // Process the image (crop, resize, compress)
+          const processedImage = await processProfilePicture(profilePicture);
+          users[userIndex].profilePicture = processedImage;
+        } catch (error) {
+          return res.status(400).json({ message: 'Failed to process profile picture' });
+        }
+      }
+    }
 
     writeData(USERS_FILE, users);
 
@@ -433,10 +531,64 @@ app.post('/api/auth/verify-2fa', async (req, res) => {
   }
 });
 
+// Helper function to check and update overdue recurring tasks
+const updateOverdueRecurringTasks = (tasks) => {
+  const now = new Date();
+  let tasksModified = false;
+
+  tasks.forEach(task => {
+    // Only process recurring tasks that are not completed
+    if (task.recurring && !task.completed && task.deadline) {
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      let deadline = new Date(task.deadline);
+      let taskDate = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
+
+      // Keep rolling forward until the task is due today or in the future
+      // Limit to 1000 iterations to prevent infinite loops
+      let iterations = 0;
+      while (taskDate < today && iterations < 1000) {
+        const nextDeadline = calculateNextRecurrence(deadline.toISOString(), task.recurrenceType);
+
+        if (!nextDeadline) break;
+
+        deadline = new Date(nextDeadline);
+        taskDate = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
+        iterations++;
+      }
+
+      // If the deadline changed, update the task
+      if (deadline.toISOString() !== task.deadline) {
+        task.deadline = deadline.toISOString();
+
+        // Reset progress for tasks with progress tracking
+        if (task.progressTracking) {
+          task.progressTracking.current = 0;
+        }
+        if (task.progress !== undefined) {
+          task.progress = 0;
+        }
+
+        tasksModified = true;
+      }
+    }
+  });
+
+  return tasksModified;
+};
+
 // Get all tasks
 app.get('/api/tasks', authMiddleware, async (req, res) => {
   try {
-    const tasks = readData(TASKS_FILE);
+    let tasks = readData(TASKS_FILE);
+
+    // Update overdue recurring tasks before returning
+    const tasksModified = updateOverdueRecurringTasks(tasks);
+
+    if (tasksModified) {
+      writeData(TASKS_FILE, tasks);
+    }
+
     const userTasks = tasks.filter(t => t.userId === req.userId);
     res.json(userTasks);
   } catch (error) {
@@ -457,6 +609,13 @@ app.post('/api/tasks', authMiddleware, async (req, res) => {
     };
     tasks.push(newTask);
     writeData(TASKS_FILE, tasks);
+
+    // Schedule notification if task has a deadline
+    if (newTask.deadline && !newTask.completed) {
+      const { scheduleDeadlineNotification } = await import('./services/notificationScheduler.js');
+      await scheduleDeadlineNotification(newTask._id, req.userId);
+    }
+
     res.status(201).json(newTask);
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -537,11 +696,30 @@ app.patch('/api/tasks/:id', authMiddleware, async (req, res) => {
           createdAt: new Date().toISOString()
         };
         tasks.push(newTask);
+
+        // Schedule notification for the new recurring task
+        const { scheduleDeadlineNotification } = await import('./services/notificationScheduler.js');
+        await scheduleDeadlineNotification(newTask._id, req.userId);
       }
     }
 
     tasks[taskIndex] = updatedTask;
     writeData(TASKS_FILE, tasks);
+
+    // Handle notification scheduling based on task updates
+    const { scheduleDeadlineNotification, cancelTaskNotifications } = await import('./services/notificationScheduler.js');
+
+    if (req.body.completed) {
+      // Cancel notifications when task is completed
+      await cancelTaskNotifications(req.params.id);
+    } else if (req.body.deadline !== undefined) {
+      // Reschedule if deadline changed
+      await cancelTaskNotifications(req.params.id);
+      if (updatedTask.deadline && !updatedTask.completed) {
+        await scheduleDeadlineNotification(req.params.id, req.userId);
+      }
+    }
+
     res.json(updatedTask);
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -559,6 +737,11 @@ app.delete('/api/tasks/:id', authMiddleware, async (req, res) => {
     }
 
     writeData(TASKS_FILE, filteredTasks);
+
+    // Cancel any scheduled notifications for this task
+    const { cancelTaskNotifications } = await import('./services/notificationScheduler.js');
+    await cancelTaskNotifications(req.params.id);
+
     res.json({ message: 'Task deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -1235,6 +1418,172 @@ app.delete('/api/kanban/columns/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// AI Task Q&A endpoint
+app.post('/api/ai/task-question', authMiddleware, async (req, res) => {
+  try {
+    const { question, taskContext } = req.body;
+    const users = readData(USERS_FILE);
+    const user = users.find(u => u.id === req.userId);
+
+    if (!user || !user.aiApiKeys) {
+      return res.status(400).json({ error: 'AI API keys not configured' });
+    }
+
+    const { claudeApiKey, chatgptApiKey, selectedProvider } = user.aiApiKeys;
+
+    if (!selectedProvider || (!claudeApiKey && !chatgptApiKey)) {
+      return res.status(400).json({ error: 'Please configure your AI API keys in settings' });
+    }
+
+    // Build context from tasks
+    const tasks = readData(TASKS_FILE);
+    const userTasks = tasks.filter(t => t.userId === req.userId);
+
+    let contextText = 'User Tasks:\n';
+    if (taskContext && Array.isArray(taskContext)) {
+      // Use specific tasks if provided
+      taskContext.forEach(taskId => {
+        const task = userTasks.find(t => t._id === taskId);
+        if (task) {
+          contextText += `- ${task.text} (Priority: ${task.priority}, Status: ${task.completed ? 'Completed' : 'Pending'})\n`;
+        }
+      });
+    } else {
+      // Use all active tasks
+      userTasks.filter(t => !t.completed).slice(0, 20).forEach(task => {
+        contextText += `- ${task.text} (Priority: ${task.priority})\n`;
+      });
+    }
+
+    let answer = '';
+
+    if (selectedProvider === 'claude' && claudeApiKey) {
+      // Call Claude API
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 1024,
+          messages: [{
+            role: 'user',
+            content: `${contextText}\n\nQuestion: ${question}\n\nPlease provide a helpful answer based on the user's tasks.`
+          }]
+        },
+        {
+          headers: {
+            'x-api-key': claudeApiKey,
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      answer = response.data.content[0].text;
+    } else if (selectedProvider === 'chatgpt' && chatgptApiKey) {
+      // Call ChatGPT API
+      const response = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful task management assistant. Answer questions about the user\'s tasks.'
+            },
+            {
+              role: 'user',
+              content: `${contextText}\n\nQuestion: ${question}`
+            }
+          ],
+          max_tokens: 1024
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${chatgptApiKey}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      answer = response.data.choices[0].message.content;
+    }
+
+    res.json({ answer });
+  } catch (error) {
+    console.error('AI question error:', error);
+    res.status(500).json({ error: error.response?.data?.error?.message || 'Failed to get AI response' });
+  }
+});
+
+// Get stored daily digest
+app.get('/api/ai/daily-digest', authMiddleware, async (req, res) => {
+  try {
+    const digests = readData(DIGESTS_FILE);
+
+    // Get today's digest or the most recent one
+    const today = new Date().toDateString();
+    let userDigest = digests
+      .filter(d => d.userId === req.userId)
+      .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt))[0];
+
+    if (!userDigest) {
+      return res.status(404).json({ error: 'No digest available. Please configure your AI settings.' });
+    }
+
+    res.json(userDigest);
+  } catch (error) {
+    console.error('Get digest error:', error);
+    res.status(500).json({ error: 'Failed to fetch digest' });
+  }
+});
+
+// Generate digest manually
+app.post('/api/ai/daily-digest/generate', authMiddleware, async (req, res) => {
+  try {
+    const { generateDigestForUser } = await import('./services/digestGenerator.js');
+    const result = await generateDigestForUser(req.userId);
+
+    if (result) {
+      res.json(result);
+    } else {
+      res.status(400).json({ error: 'Failed to generate digest. Please configure your AI settings.' });
+    }
+  } catch (error) {
+    console.error('Manual digest generation error:', error);
+    res.status(500).json({ error: 'Failed to generate digest' });
+  }
+});
+
+// Update digest preferences
+app.patch('/api/user/digest-preferences', authMiddleware, async (req, res) => {
+  try {
+    const { enabled, time, frequency, customPrompt } = req.body;
+    const users = readData(USERS_FILE);
+    const userIndex = users.findIndex(u => u.id === req.userId);
+
+    if (userIndex === -1) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    users[userIndex].digestPreferences = {
+      enabled: enabled !== undefined ? enabled : users[userIndex].digestPreferences?.enabled || true,
+      time: time || users[userIndex].digestPreferences?.time || '08:00',
+      frequency: frequency || users[userIndex].digestPreferences?.frequency || 'daily',
+      customPrompt: customPrompt !== undefined ? customPrompt : users[userIndex].digestPreferences?.customPrompt || null
+    };
+
+    writeData(USERS_FILE, users);
+
+    const { password, ...userWithoutPassword } = users[userIndex];
+    res.json(userWithoutPassword);
+  } catch (error) {
+    console.error('Update digest preferences error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Notification routes
+import notificationRoutes from './routes/notifications.js';
+app.use('/api/notifications', authMiddleware, notificationRoutes);
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({
@@ -1242,6 +1591,12 @@ app.get('/health', (req, res) => {
     storage: 'file-based'
   });
 });
+
+// Start notification worker
+import './jobs/notificationWorker.js';
+
+// Start digest scheduler
+import './jobs/digestScheduler.js';
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✓ Quest Master Server running on http://localhost:${PORT}`);
@@ -1257,5 +1612,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  GET /api/categories - Get categories (protected)`);
   console.log(`  POST /api/block-devices - Block devices`);
   console.log(`  POST /api/unblock-device - Unblock a device`);
+  console.log(`  POST /api/notifications/register - Register device for notifications (protected)`);
+  console.log(`  POST /api/notifications/test - Send test notification (protected)`);
   console.log(`  GET /health - Health check`);
 });

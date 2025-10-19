@@ -1,0 +1,19 @@
+[Unit]
+Description=Quest Master Backend Server
+After=network.target mongodb.service
+Wants=mongodb.service
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/quest-master/server
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quest-master-backend
+
+[Install]
+WantedBy=multi-user.target

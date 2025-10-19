@@ -2,6 +2,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-lg, 32px);
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .task-section {
@@ -10,6 +13,9 @@
   border-radius: var(--space-md, 24px);
   padding: var(--space-lg, 32px);
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .section-title {
@@ -34,6 +40,8 @@
   display: grid;
   gap: var(--space-md, 24px);
   grid-template-columns: 1fr;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* Multi-column layout for desktop/tablet */
@@ -61,6 +69,10 @@
   position: relative;
   overflow: hidden;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .task-card:hover {
@@ -385,93 +397,356 @@
 }
 
 @media (max-width: 768px) {
+  .task-lists {
+    gap: 10px;
+  }
+
   .task-section {
-    padding: 1.25rem;
-    border-radius: 15px;
+    padding: 12px;
+    border-radius: 10px;
+    margin: 0;
   }
 
   .section-title {
-    font-size: 1.25rem;
-    margin-bottom: 1.25rem;
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 10px;
   }
 
   .category-icon-title {
-    font-size: 1.5rem;
+    font-size: 17px;
   }
 
+  .tasks-grid {
+    gap: 10px;
+  }
+
+  /* FLEX LAYOUT - content left, buttons right */
   .task-card {
-    padding: 1.25rem;
-    gap: 0.875rem;
+    padding: 12px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 10px;
+    align-items: flex-start;
+    border: 2px solid lime;
+  }
+
+  .task-category-bar {
+    display: none;
+  }
+
+  .task-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .task-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .task-title-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
   }
 
   .task-text {
-    font-size: 1rem;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.4;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .task-icon {
-    font-size: 1.375rem;
+    font-size: 18px;
   }
 
   .priority-badge {
-    padding: 0.3125rem 0.6875rem;
-    font-size: 0.6875rem;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* Action buttons on RIGHT */
+  .task-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+    background: rgba(0, 255, 0, 0.2);
+  }
+
+  .task-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 6px;
+    padding: 0;
+  }
+
+  .task-btn svg {
+    width: 16px;
+    height: 16px;
   }
 
   .task-deadline {
-    font-size: 0.8125rem;
+    font-size: 12px;
+    padding: 6px 8px;
   }
 
-  .task-actions {
-    flex-direction: row;
-    align-self: flex-end;
+  .challenge-meta {
+    font-size: 11px;
+  }
+
+  .task-progress {
+    gap: 6px;
+  }
+
+  .progress-label,
+  .progress-value {
+    font-size: 12px;
+  }
+
+  .progress-bar-container {
+    height: 28px;
+  }
+
+  .task-device-block {
+    gap: 6px;
   }
 
   .device-select {
     max-width: 100%;
+    font-size: 13px;
+    padding: 8px 10px;
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 767px) {
+  /* Container spacing */
+  .task-lists {
+    gap: 10px;
+  }
+
   .task-section {
-    padding: 1rem;
+    padding: 10px;
+    margin: 0;
+    border-radius: 10px;
   }
 
   .section-title {
-    font-size: 1.125rem;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 10px;
   }
 
+  .category-icon-title {
+    font-size: 16px;
+  }
+
+  .tasks-grid {
+    gap: 8px;
+  }
+
+  /* CLEAN MOBILE CARD - Flex layout (override grid from 768px) */
   .task-card {
-    padding: 1rem;
-    flex-direction: column;
-    align-items: stretch;
+    padding: 10px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    border-radius: 8px;
+    min-height: 0;
+    align-items: flex-start !important;
+    grid-template-areas: none !important;
+    grid-template-columns: none !important;
+    border: 2px solid red !important;
+  }
+
+  /* Hide category bar on mobile for cleaner look */
+  .task-category-bar {
+    display: none !important;
+  }
+
+  /* LEFT: All content */
+  .task-content {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    min-width: 0;
+    order: 1;
+    grid-area: unset !important;
   }
 
   .task-header {
+    display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
+    gap: 4px;
   }
 
   .task-title-row {
-    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .task-icon {
+    font-size: 16px;
+    flex-shrink: 0;
   }
 
   .task-text {
-    font-size: 0.9375rem;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.3;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .priority-badge {
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 3px;
     align-self: flex-start;
   }
 
+  .task-deadline {
+    font-size: 11px;
+    padding: 4px 6px;
+    gap: 4px;
+  }
+
+  .task-deadline svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .challenge-meta {
+    display: flex;
+    gap: 4px;
+    font-size: 10px;
+    flex-wrap: wrap;
+  }
+
+  .difficulty-badge,
+  .category-type,
+  .challenge-points {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .flag-icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .task-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .progress-label,
+  .progress-value {
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .progress-bar-container {
+    height: 24px;
+  }
+
+  .progress-bar-fill {
+    height: 5px;
+  }
+
+  .progress-slider {
+    height: 24px;
+  }
+
+  .progress-slider::-webkit-slider-runnable-track {
+    height: 5px;
+  }
+
+  .progress-slider::-moz-range-track {
+    height: 5px;
+  }
+
+  .progress-slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -5px;
+  }
+
+  .progress-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+
+  .task-device-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .device-select {
+    font-size: 12px;
+    padding: 6px 8px;
+    height: 32px;
+  }
+
+  .device-blocked-indicator {
+    font-size: 11px;
+    padding: 4px 6px;
+    gap: 4px;
+  }
+
+  .device-blocked-indicator svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* RIGHT: Action buttons column (override grid from 768px) */
   .task-actions {
-    width: 100%;
-    justify-content: flex-end;
-    margin-top: 0.5rem;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 5px !important;
+    flex-shrink: 0 !important;
+    align-self: flex-start !important;
+    order: 2 !important;
+    width: 34px !important;
+    grid-area: unset !important;
+    grid-row: unset !important;
+    background: rgba(255, 0, 0, 0.3) !important;
+    position: relative !important;
   }
 
   .task-btn {
-    width: 40px;
-    height: 40px;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+    padding: 0 !important;
+    border-radius: 6px;
+  }
+
+  .task-btn svg {
+    width: 16px !important;
+    height: 16px !important;
   }
 }

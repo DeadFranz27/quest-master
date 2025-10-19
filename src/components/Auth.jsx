@@ -4,9 +4,12 @@ import { Shield } from 'lucide-react';
 import AstronautScene from './AstronautScene';
 import './Auth.css';
 
-const API_URL = window.location.hostname === 'localhost'
-  ? 'http://localhost:3001'
-  : `http://${window.location.hostname}:3001`;
+// Allow override via localStorage for debugging
+const API_URL = localStorage.getItem('API_URL') || (
+  window.location.hostname === 'localhost'
+    ? 'http://localhost:3001'
+    : `http://${window.location.hostname}:3001`
+);
 
 const Auth = ({ onLogin }) => {
   const [formData, setFormData] = useState({
@@ -25,13 +28,23 @@ const Auth = ({ onLogin }) => {
     setLoading(true);
 
     try {
+      console.log('Attempting login to:', `${API_URL}/api/auth/login`);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: formData.username, password: formData.password })
+        body: JSON.stringify({ username: formData.username, password: formData.password }),
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
+      console.log('Login response status:', response.status);
       const data = await response.json();
+      console.log('Login response data:', data);
 
       if (!response.ok) {
         throw new Error(data.error || 'Authentication failed');
@@ -47,10 +60,18 @@ const Auth = ({ onLogin }) => {
 
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      console.log('Calling onLogin with user:', data.user);
       onLogin(data.user, data.token);
+      setLoading(false);
     } catch (err) {
-      setError(err.message);
-    } finally {
+      console.error('Login error:', err);
+      if (err.name === 'AbortError') {
+        setError('Connection timeout. Check if the backend server is accessible at ' + API_URL);
+      } else if (err.message === 'Failed to fetch') {
+        setError('Cannot connect to server at ' + API_URL + '. Check your network connection or try http://localhost:3001');
+      } else {
+        setError(err.message);
+      }
       setLoading(false);
     }
   };

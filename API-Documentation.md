@@ -15,10 +15,12 @@ Complete REST API documentation for Quest Master backend access.
 4. [Categories](#categories)
 5. [Routines](#routines)
 6. [Kanban Board](#kanban-board)
-7. [Device Control (Home Assistant)](#device-control)
-8. [Admin Operations](#admin-operations)
-9. [System Updates](#system-updates)
-10. [Error Handling](#error-handling)
+7. [AI Integration](#ai-integration)
+8. [Push Notifications](#push-notifications)
+9. [Device Control (Home Assistant)](#device-control)
+10. [Admin Operations](#admin-operations)
+11. [System Updates](#system-updates)
+12. [Error Handling](#error-handling)
 
 ---
 
@@ -171,7 +173,12 @@ Content-Type: application/json
   "email": "newemail@example.com",
   "currentPassword": "oldpassword",
   "newPassword": "newpassword",
-  "profilePicture": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+  "profilePicture": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
+  "aiApiKeys": {
+    "claudeApiKey": "sk-ant-api03-...",
+    "chatgptApiKey": "sk-proj-...",
+    "selectedProvider": "claude"
+  }
 }
 ```
 
@@ -183,6 +190,8 @@ Content-Type: application/json
 - Set `profilePicture` to `null` to remove the profile picture
 - Images are automatically compressed on the client side (max 400x400px, 80% JPEG quality)
 - Maximum payload size: 10MB
+- `aiApiKeys` object stores API keys for Claude and ChatGPT integration
+- `selectedProvider` must be either "claude" or "chatgpt"
 
 **Success Response (200):**
 ```json
@@ -1094,6 +1103,480 @@ See [Update Task](#update-task) for full details.
 
 ---
 
+## AI Integration
+
+Quest Master integrates with Claude (Anthropic) and ChatGPT (OpenAI) to provide AI-powered features including task Q&A and daily digest generation.
+
+### Configure AI API Keys
+
+Configure your AI provider API keys via the [Update User Profile](#update-user-profile) endpoint.
+
+**Required Fields:**
+```json
+{
+  "aiApiKeys": {
+    "claudeApiKey": "sk-ant-api03-...",
+    "chatgptApiKey": "sk-proj-...",
+    "selectedProvider": "claude"
+  }
+}
+```
+
+**Supported Providers:**
+- `claude` - Uses Claude 3 Haiku model via Anthropic API
+- `chatgpt` - Uses GPT-4o Mini model via OpenAI API
+
+---
+
+### Ask AI About Tasks
+
+Get AI-powered answers to questions about your tasks.
+
+**Endpoint:** `POST /api/ai/task-question`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "question": "What should I prioritize today?",
+  "taskContext": ["1697123456789", "1697123456790"]
+}
+```
+
+**Field Descriptions:**
+- `question` (required): Your question about tasks
+- `taskContext` (optional): Array of task IDs for specific context. If omitted, uses all active tasks.
+
+**Success Response (200):**
+```json
+{
+  "answer": "Based on your tasks, I recommend prioritizing the high-priority items with approaching deadlines. Start with 'Complete project documentation' (due tomorrow) and 'Prepare presentation' (due in 2 days). Both are marked high priority and will have significant impact if completed on time."
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "error": "AI API keys not configured"
+}
+```
+
+**Notes:**
+- Requires AI API keys to be configured in user profile
+- Uses up to 20 most recent active tasks if no taskContext provided
+- Response uses the selected AI provider (Claude or ChatGPT)
+- Model used: Claude 3 Haiku or GPT-4o Mini
+
+---
+
+### Get Daily Digest
+
+Retrieve the most recent AI-generated daily digest.
+
+**Endpoint:** `GET /api/ai/daily-digest`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Success Response (200):**
+```json
+{
+  "userId": "1",
+  "digest": "## 🎯 Focus Today\n- Complete project documentation\n- Review pull requests\n- Update API documentation\n\n## ⚠️ Attention Needed\n- Client presentation (overdue)\n\n## ✅ Progress\n- 8/15 tasks completed this week (53%)\n\n## 💪 Quick Win\n- Update README file (15 min task)",
+  "stats": {
+    "total": 15,
+    "completed": 8,
+    "pending": 7,
+    "highPriority": 3,
+    "overdue": 1,
+    "upcoming": 4
+  },
+  "generatedAt": "2025-10-20T08:00:00.000Z"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "error": "No digest available. Please configure your AI settings."
+}
+```
+
+**Notes:**
+- Returns the most recent digest (typically generated daily)
+- Digests are auto-generated based on user's digest preferences
+- Historical digests are kept for 7 days
+
+---
+
+### Generate Daily Digest Manually
+
+Manually trigger digest generation instead of waiting for scheduled generation.
+
+**Endpoint:** `POST /api/ai/daily-digest/generate`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Success Response (200):**
+```json
+{
+  "userId": "1",
+  "digest": "## 🎯 Focus Today\n- Complete project documentation\n- Review pull requests\n\n## ⚠️ Attention Needed\n- Client presentation (overdue)\n\n## ✅ Progress\n- 8/15 tasks completed (53%)\n\n## 💪 Quick Win\n- Update README file",
+  "stats": {
+    "total": 15,
+    "completed": 8,
+    "pending": 7,
+    "highPriority": 3,
+    "overdue": 1,
+    "upcoming": 4
+  },
+  "generatedAt": "2025-10-20T10:30:00.000Z"
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "error": "Failed to generate digest. Please configure your AI settings."
+}
+```
+
+**Notes:**
+- Generates a new digest immediately
+- Useful for testing or getting an updated digest
+- Replaces the previous digest for today
+
+---
+
+### Update Digest Preferences
+
+Configure when and how daily digests are generated.
+
+**Endpoint:** `PATCH /api/user/digest-preferences`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "enabled": true,
+  "time": "08:00",
+  "frequency": "daily",
+  "customPrompt": "Create a motivational digest focusing on my top 3 priorities. Keep it under 50 words and use emojis."
+}
+```
+
+**Field Descriptions:**
+- `enabled` (optional): Enable/disable automatic digest generation (default: true)
+- `time` (optional): Time of day to generate digest in HH:MM format (default: "08:00")
+- `frequency` (optional): "daily" or "twice-daily" (default: "daily")
+- `customPrompt` (optional): Custom prompt to override the default digest format. Set to null to use default.
+
+**Success Response (200):**
+```json
+{
+  "id": "1",
+  "username": "admin",
+  "email": "admin@localhost",
+  "digestPreferences": {
+    "enabled": true,
+    "time": "08:00",
+    "frequency": "daily",
+    "customPrompt": "Create a motivational digest focusing on my top 3 priorities. Keep it under 50 words and use emojis."
+  }
+}
+```
+
+**Default Digest Format:**
+The default prompt generates a structured digest with:
+- 🎯 Focus Today: Top 3 tasks to complete
+- ⚠️ Attention Needed: Overdue/high priority items
+- ✅ Progress: Completion rate and achievements
+- 💪 Quick Win: One easy task to build momentum
+
+**Custom Prompt Tips:**
+- Be specific about desired format and length
+- Include context like "Based on the task summary provided..."
+- Specify tone (motivational, concise, detailed, etc.)
+- The AI has access to task statistics and lists automatically
+
+**Notes:**
+- Digests are generated automatically at the specified time if enabled
+- Requires AI API keys to be configured
+- Custom prompts override the default structured format
+- Set customPrompt to null to revert to default format
+
+---
+
+## Push Notifications
+
+iOS push notification support for task deadlines, reminders, and daily digests via Apple Push Notification service (APNs).
+
+### Register Device for Notifications
+
+Register an iOS device to receive push notifications.
+
+**Endpoint:** `POST /api/notifications/register`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "deviceToken": "a1b2c3d4e5f6...",
+  "platform": "ios",
+  "settings": {
+    "enabled": true,
+    "deadlineAlerts": true,
+    "taskReminders": true,
+    "dailyDigest": false,
+    "advanceNotice": 30
+  }
+}
+```
+
+**Field Descriptions:**
+- `deviceToken` (required): APNs device token from iOS app
+- `platform` (optional): Platform identifier, default: "ios"
+- `settings.enabled` (optional): Enable all notifications (default: true)
+- `settings.deadlineAlerts` (optional): Notify for task deadlines (default: true)
+- `settings.taskReminders` (optional): Notify for task reminders (default: true)
+- `settings.dailyDigest` (optional): Send daily digest via notification (default: false)
+- `settings.advanceNotice` (optional): Minutes before deadline to send alert (default: 30)
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Device registered successfully"
+}
+```
+
+**Notes:**
+- Updates existing device if already registered
+- Automatically schedules notifications for existing tasks with deadlines
+- Requires APNs configuration in server `.env` file
+
+---
+
+### Unregister Device
+
+Remove a device from receiving push notifications.
+
+**Endpoint:** `DELETE /api/notifications/unregister`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "deviceToken": "a1b2c3d4e5f6..."
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Device unregistered"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "error": "Device token not found"
+}
+```
+
+---
+
+### Get Notification Settings
+
+Retrieve notification settings for all registered devices.
+
+**Endpoint:** `GET /api/notifications/settings`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Success Response (200):**
+```json
+{
+  "devices": [
+    {
+      "id": "1697123456789",
+      "userId": "1",
+      "deviceToken": "a1b2c3d4e5f6...",
+      "platform": "ios",
+      "enabled": true,
+      "deadlineAlerts": true,
+      "taskReminders": true,
+      "dailyDigest": false,
+      "advanceNotice": 30,
+      "createdAt": "2025-10-15T10:00:00.000Z",
+      "updatedAt": "2025-10-15T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### Update Notification Settings
+
+Update notification preferences for a specific device.
+
+**Endpoint:** `PATCH /api/notifications/settings/:deviceToken`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**URL Parameters:**
+- `deviceToken`: The device token to update
+
+**Request Body:**
+```json
+{
+  "enabled": true,
+  "deadlineAlerts": true,
+  "taskReminders": false,
+  "dailyDigest": true,
+  "advanceNotice": 60
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "device": {
+    "id": "1697123456789",
+    "userId": "1",
+    "deviceToken": "a1b2c3d4e5f6...",
+    "platform": "ios",
+    "enabled": true,
+    "deadlineAlerts": true,
+    "taskReminders": false,
+    "dailyDigest": true,
+    "advanceNotice": 60,
+    "updatedAt": "2025-10-20T10:30:00.000Z"
+  }
+}
+```
+
+**Notes:**
+- Automatically reschedules notifications if deadline settings changed
+- Only updates settings for devices owned by the authenticated user
+
+---
+
+### Send Test Notification
+
+Send a test notification to verify push notification setup.
+
+**Endpoint:** `POST /api/notifications/test`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "message": "Test notification from Quest Master!"
+}
+```
+
+**Field Descriptions:**
+- `message` (optional): Custom test message. Default: "Quest Master notifications are working! 🎉"
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "sent": 1,
+  "results": [
+    {
+      "deviceToken": "a1b2c3d4e5f6...",
+      "sent": "2025-10-20T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+**Error Response (503):**
+```json
+{
+  "error": "APNs is not configured. Set APNS_KEY_PATH, APNS_KEY_ID, and APNS_TEAM_ID in .env"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "error": "No registered devices found"
+}
+```
+
+**Notes:**
+- Sends to all registered devices for the authenticated user
+- Useful for testing APNs configuration
+- Does not affect scheduled notifications
+
+---
+
+### Automatic Notification Triggers
+
+Push notifications are automatically sent for:
+
+1. **Task Deadline Alerts**
+   - Sent X minutes before task deadline (based on advanceNotice setting)
+   - Only sent for incomplete tasks with deadlines
+   - Example: "Task due soon: Complete project documentation (due in 30 minutes)"
+
+2. **Daily Digest Notifications** (if enabled)
+   - Sent at user's configured digest time
+   - Contains AI-generated daily summary
+   - Requires AI API keys to be configured
+
+3. **Task Updates**
+   - New task created with deadline: Notification scheduled automatically
+   - Task completed: Scheduled notification cancelled
+   - Task deadline changed: Notification rescheduled
+   - Task deleted: Scheduled notification cancelled
+
+---
+
 ## Device Control
 
 Control smart home devices via Home Assistant integration.
@@ -1600,7 +2083,21 @@ JWT_SECRET=your-secret-key-change-this-in-production
 # Home Assistant Integration
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=YOUR_LONG_LIVED_ACCESS_TOKEN
+
+# Apple Push Notification Service (APNs) Configuration
+# Required for iOS push notifications
+APNS_KEY_ID=ABC123XYZ
+APNS_TEAM_ID=DEF456UVW
+APNS_KEY_PATH=./AuthKey_ABC123XYZ.p8
+APNS_BUNDLE_ID=com.questmaster.app
+APNS_PRODUCTION=false
 ```
+
+**APNs Setup Notes:**
+- Get APNS_KEY_ID and APNS_TEAM_ID from [Apple Developer Portal](https://developer.apple.com/account)
+- Download .p8 key file and place in server root directory
+- Set APNS_PRODUCTION=true for production environment
+- Push notifications require valid APNs credentials
 
 ---
 
@@ -1608,11 +2105,14 @@ HA_TOKEN=YOUR_LONG_LIVED_ACCESS_TOKEN
 
 Quest Master uses file-based JSON storage in `server/data/`:
 
-- `users.json` - User accounts
+- `users.json` - User accounts (includes AI API keys and digest preferences)
 - `tasks.json` - Tasks
 - `categories.json` - Categories
 - `routines.json` - Routines
 - `kanban-columns.json` - Kanban columns
+- `digests.json` - AI-generated daily digests (last 7 days)
+- `device-tokens.json` - Push notification device registrations
+- `scheduled-notifications.json` - Scheduled push notifications
 - `update-log.json` - Update history
 - `update-config.json` - Update configuration
 
@@ -1853,14 +2353,25 @@ if __name__ == '__main__':
 
 ## API Changelog
 
-### Version 1.0.0 (Current)
+### Version 1.2.0 (Current - October 2025)
+- **AI Integration**: Claude and ChatGPT support for task Q&A
+- **Daily Digest**: AI-generated daily task summaries with customizable prompts
+- **Push Notifications**: iOS APNs support for deadline alerts and reminders
+- **Profile Pictures**: Upload and manage user avatars (base64 images)
+- **Enhanced User Model**: Added aiApiKeys, digestPreferences, and profilePicture fields
+
+### Version 1.1.0 (October 2025)
+- Kanban board columns (CRUD)
+- Profile picture functionality
+- Increased payload limit to 10MB for images
+
+### Version 1.0.0
 - Initial API release
 - User authentication with JWT
 - Two-factor authentication support
 - Task management (CRUD)
 - Category management (CRUD)
 - Routine management (CRUD)
-- Kanban board columns (CRUD)
 - Device control via Home Assistant
 - Admin user management
 - System update management
@@ -1903,8 +2414,9 @@ if __name__ == '__main__':
 
 ### User Management
 - `GET /api/user/profile` - Get profile
-- `PATCH /api/user/profile` - Update profile
+- `PATCH /api/user/profile` - Update profile (includes AI keys)
 - `PATCH /api/user/stats` - Update stats
+- `PATCH /api/user/digest-preferences` - Update digest preferences
 - `POST /api/user/2fa/setup` - Setup 2FA
 - `POST /api/user/2fa/enable` - Enable 2FA
 - `POST /api/user/2fa/disable` - Disable 2FA
@@ -1935,6 +2447,18 @@ if __name__ == '__main__':
 - `PATCH /api/kanban/columns/:id` - Update column
 - `DELETE /api/kanban/columns/:id` - Delete column
 
+### AI Integration
+- `POST /api/ai/task-question` - Ask AI about tasks
+- `GET /api/ai/daily-digest` - Get daily digest
+- `POST /api/ai/daily-digest/generate` - Generate digest manually
+
+### Push Notifications
+- `POST /api/notifications/register` - Register device
+- `DELETE /api/notifications/unregister` - Unregister device
+- `GET /api/notifications/settings` - Get notification settings
+- `PATCH /api/notifications/settings/:deviceToken` - Update settings
+- `POST /api/notifications/test` - Send test notification
+
 ### Device Control
 - `POST /api/block-devices` - Block devices
 - `POST /api/unblock-device` - Unblock device
@@ -1953,5 +2477,5 @@ if __name__ == '__main__':
 
 ---
 
-**Quest Master API Documentation v1.0.0**
-*Last Updated: October 15, 2025*
+**Quest Master API Documentation v1.2.0**
+*Last Updated: October 20, 2025*
