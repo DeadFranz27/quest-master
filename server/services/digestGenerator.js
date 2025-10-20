@@ -196,6 +196,38 @@ ${userPrompt}`;
       console.error('Response status:', error.response.status);
       console.error('Response data:', JSON.stringify(error.response.data, null, 2));
     }
+
+    // Check if this is a temporary rate limit error (429) or permanent error (401, etc)
+    const isRateLimitError = error.response?.status === 429;
+    const errorType = error.response?.data?.error?.type;
+
+    // For rate limit errors, only save if we don't have a recent successful digest
+    const digests = readData(DIGESTS_FILE);
+    const recentSuccessfulDigest = digests
+      .filter(d => d.userId === userId && !d.error)
+      .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt))[0];
+
+    // If it's a rate limit and we have a recent digest (within last 24 hours), don't save error
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if (isRateLimitError && recentSuccessfulDigest && new Date(recentSuccessfulDigest.generatedAt) > twentyFourHoursAgo) {
+      console.log(`Rate limit hit for user ${userId}, but recent digest exists - not saving error`);
+      return null;
+    }
+
+    // Save error state for permanent errors or rate limits without recent digest
+    const errorEntry = {
+      userId,
+      error: true,
+      errorMessage: error.response?.data?.error?.message || error.message,
+      errorStatus: error.response?.status,
+      errorType: errorType || 'unknown',
+      isTemporary: isRateLimitError,
+      generatedAt: new Date().toISOString()
+    };
+
+    digests.push(errorEntry);
+    writeData(DIGESTS_FILE, digests);
+
     return null;
   }
 }

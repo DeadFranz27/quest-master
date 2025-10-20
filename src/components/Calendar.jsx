@@ -73,6 +73,20 @@ function Calendar({ tasks }) {
       const remaining = target - current;
       const periodsNeeded = Math.ceil(remaining / unitInterval);
 
+      // Calculate completion date
+      const completionDate = new Date(today);
+      if (intervalType === 'daily') {
+        completionDate.setDate(today.getDate() + periodsNeeded - 1);
+      } else if (intervalType === 'weekly') {
+        completionDate.setDate(today.getDate() + (periodsNeeded * 7) - 1);
+      } else if (intervalType === 'monthly') {
+        completionDate.setMonth(today.getMonth() + periodsNeeded);
+        completionDate.setDate(0); // Last day of the month
+      } else if (intervalType === 'yearly') {
+        completionDate.setFullYear(today.getFullYear() + periodsNeeded);
+        completionDate.setMonth(11, 31); // Last day of the year
+      }
+
       // Only show goals for today or future dates, but not past
       if (date < today) return;
 
@@ -83,32 +97,36 @@ function Calendar({ tasks }) {
         const diffTime = date.getTime() - today.getTime();
         periodsSinceToday = Math.floor(diffTime / (1000 * 60 * 60 * 24));
       } else if (intervalType === 'weekly') {
-        // Only show on Mondays
-        if (date.getDay() !== 1) return;
-
+        // Show every day during the goal period, not just Mondays
         const diffTime = date.getTime() - today.getTime();
         const daysSince = Math.floor(diffTime / (1000 * 60 * 60 * 24));
         periodsSinceToday = Math.floor(daysSince / 7);
       } else if (intervalType === 'monthly') {
-        // Only show on 1st of month
-        if (date.getDate() !== 1) return;
-
+        // Show every day during the goal period
         const monthsDiff = (date.getFullYear() - today.getFullYear()) * 12 + (date.getMonth() - today.getMonth());
         periodsSinceToday = monthsDiff;
       } else if (intervalType === 'yearly') {
-        // Only show on January 1st
-        if (date.getMonth() !== 0 || date.getDate() !== 1) return;
-
         periodsSinceToday = date.getFullYear() - today.getFullYear();
       }
 
+      // Check if this date is within the goal completion timeline
+      const isInTimeline = date <= completionDate;
+
+      // Calculate cumulative progress for this date
+      let cumulativeTarget = Math.min((periodsSinceToday + 1) * unitInterval + current, target);
+      const daysRemaining = Math.max(0, Math.ceil((completionDate - date) / (1000 * 60 * 60 * 24)));
+
       // Only show the goal if this date is within the calculated periods needed
-      if (periodsSinceToday >= 0 && periodsSinceToday < periodsNeeded) {
+      if (periodsSinceToday >= 0 && isInTimeline) {
         goals.push({
           ...task,
           isProgressGoal: true,
           goalAmount: unitInterval,
-          goalUnit: unit
+          goalUnit: unit,
+          cumulativeTarget,
+          daysRemaining,
+          isCompletionDate: date.toDateString() === completionDate.toDateString(),
+          estimatedCompletion: completionDate
         });
       }
     });
@@ -271,20 +289,32 @@ function Calendar({ tasks }) {
                   <div className="calendar-recurring-tasks">
                     {dayTasks.filter(t => t.isProgressGoal || t.isRecurring).map(task => {
                       const bgColor = task.isProgressGoal
-                        ? 'rgba(139, 92, 246, 0.1)'
+                        ? (task.isCompletionDate ? 'rgba(34, 197, 94, 0.15)' : 'rgba(139, 92, 246, 0.1)')
                         : (task.category?.color ? `${task.category.color}15` : 'var(--card-bg)');
                       const borderColor = task.isProgressGoal
-                        ? '#8b5cf6'
+                        ? (task.isCompletionDate ? '#22c55e' : '#8b5cf6')
                         : (task.category?.color || 'var(--primary)');
+
+                      const tooltipText = task.isProgressGoal
+                        ? `${task.text}\n${task.isCompletionDate ? '🎯 COMPLETION DAY' : `Goal: ${task.goalAmount} ${task.goalUnit}`}\n${task.daysRemaining} days remaining\nTarget: ${task.cumulativeTarget}/${task.progressTracking.target} ${task.goalUnit}`
+                        : task.text;
 
                       return (
                         <div
                           key={task._id}
-                          className={`calendar-task-compact ${task.completed ? 'completed' : ''}`}
-                          title={task.isProgressGoal ? `Goal: ${task.goalAmount} ${task.goalUnit}` : task.text}
+                          className={`calendar-task-compact ${task.completed ? 'completed' : ''} ${task.isCompletionDate ? 'completion-date' : ''}`}
+                          title={tooltipText}
                           style={{ backgroundColor: bgColor, borderLeftColor: borderColor }}
                         >
                           <span className="calendar-task-icon">{task.icon}</span>
+                          {task.isCompletionDate && (
+                            <span className="calendar-task-completion-flag">🎯</span>
+                          )}
+                          {task.daysRemaining !== undefined && !task.isCompletionDate && (
+                            <span className="calendar-task-days-remaining" style={{ fontSize: '10px', marginLeft: '4px', color: borderColor }}>
+                              {task.daysRemaining}d
+                            </span>
+                          )}
                           {task.completed && (
                             <span className="calendar-task-check">✓</span>
                           )}

@@ -203,6 +203,17 @@ const writeData = (file, data) => {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 };
 
+// Calculate XP based on task priority
+const calculateXP = (priority) => {
+  const xpMap = {
+    low: 25,
+    medium: 50,
+    high: 100,
+    critical: 200
+  };
+  return xpMap[priority] || 50;
+};
+
 // Middleware to verify JWT token
 const authMiddleware = async (req, res, next) => {
   try {
@@ -674,6 +685,48 @@ app.patch('/api/tasks/:id', authMiddleware, async (req, res) => {
         updatedTask[key] = req.body[key];
       }
     });
+
+    // If task is being completed, award XP
+    if (req.body.completed && !task.completed) {
+      const users = readData(USERS_FILE);
+      const userIndex = users.findIndex(u => u.id === req.userId);
+
+      if (userIndex !== -1) {
+        // Calculate XP based on task
+        let xpGained = 0;
+
+        if (task.progressTracking && task.progressTracking.enabled) {
+          // For progress-tracking tasks, award XP based on completion percentage
+          const progressPercent = task.progressTracking.current / task.progressTracking.target;
+          const baseXP = task.xp || calculateXP(task.priority);
+          xpGained = Math.floor(baseXP * progressPercent);
+        } else {
+          // For regular tasks, award full XP
+          xpGained = task.xp || calculateXP(task.priority);
+        }
+
+        // Update user stats
+        let newXP = users[userIndex].xp + xpGained;
+        let newLevel = users[userIndex].level;
+        let newXpToNext = users[userIndex].xpToNextLevel;
+
+        // Level up logic
+        while (newXP >= newXpToNext) {
+          newXP -= newXpToNext;
+          newLevel++;
+          newXpToNext = Math.floor(newXpToNext * 1.5);
+        }
+
+        users[userIndex].xp = newXP;
+        users[userIndex].level = newLevel;
+        users[userIndex].totalPoints = (users[userIndex].totalPoints || 0) + xpGained;
+        users[userIndex].xpToNextLevel = newXpToNext;
+
+        writeData(USERS_FILE, users);
+
+        console.log(`User ${req.userId} earned ${xpGained} XP for completing task "${task.text}"`);
+      }
+    }
 
     // If task is being completed and it's recurring, create next occurrence
     if (req.body.completed && !task.completed && task.recurring) {
@@ -1518,17 +1571,43 @@ app.get('/api/ai/daily-digest', authMiddleware, async (req, res) => {
   try {
     const digests = readData(DIGESTS_FILE);
 
-    // Get today's digest or the most recent one
-    const today = new Date().toDateString();
-    let userDigest = digests
+    // Get all user digests sorted by most recent
+    const userDigests = digests
       .filter(d => d.userId === req.userId)
-      .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt))[0];
+      .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt));
 
-    if (!userDigest) {
+    if (userDigests.length === 0) {
       return res.status(404).json({ error: 'No digest available. Please configure your AI settings.' });
     }
 
-    res.json(userDigest);
+    const latestEntry = userDigests[0];
+    const latestSuccess = userDigests.find(d => !d.error);
+
+    // If latest is an error
+    if (latestEntry.error) {
+      // For temporary errors (rate limits), return the most recent successful digest if it's recent
+      if (latestEntry.isTemporary && latestSuccess) {
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        if (new Date(latestSuccess.generatedAt) > twentyFourHoursAgo) {
+          // Return successful digest with a warning header
+          res.set('X-Digest-Status', 'rate-limited');
+          res.set('X-Digest-Warning', 'Rate limit reached, showing recent digest');
+          return res.json(latestSuccess);
+        }
+      }
+
+      // For permanent errors or old successful digests, return error
+      return res.status(503).json({
+        error: 'Failed to generate digest',
+        message: latestEntry.errorMessage,
+        status: latestEntry.errorStatus,
+        errorType: latestEntry.errorType,
+        isTemporary: latestEntry.isTemporary,
+        timestamp: latestEntry.generatedAt
+      });
+    }
+
+    res.json(latestEntry);
   } catch (error) {
     console.error('Get digest error:', error);
     res.status(500).json({ error: 'Failed to fetch digest' });

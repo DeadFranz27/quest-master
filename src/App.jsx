@@ -1557,8 +1557,10 @@ function App() {
           token={token}
           onLogout={handleLogout}
           onUpdateUser={(updatedUser) => {
-            setUser(updatedUser);
-            localStorage.setItem('user', JSON.stringify(updatedUser));
+            // Force a new object reference to trigger re-render
+            const newUser = { ...updatedUser };
+            setUser(newUser);
+            localStorage.setItem('user', JSON.stringify(newUser));
           }}
         />
       );
@@ -1638,8 +1640,23 @@ function App() {
                         <span className="subtask-count">{subtasks.filter(t => t.completed).length}/{subtasks.length}</span>
                       )}
                       {task.progressTracking && task.progressTracking.enabled && (
-                        <span className="progress-badge">
+                        <span className="progress-badge" title={`${task.progressTracking.intervalType} goal: ${task.progressTracking.unitInterval} ${task.progressTracking.unit}`}>
                           {task.progressTracking.current}/{task.progressTracking.target} {task.progressTracking.unit}
+                          {(() => {
+                            const remaining = task.progressTracking.target - task.progressTracking.current;
+                            const periodsNeeded = Math.ceil(remaining / task.progressTracking.unitInterval);
+                            const today = new Date();
+                            if (task.progressTracking.intervalType === 'daily') {
+                              today.setDate(today.getDate() + periodsNeeded);
+                            } else if (task.progressTracking.intervalType === 'weekly') {
+                              today.setDate(today.getDate() + (periodsNeeded * 7));
+                            } else if (task.progressTracking.intervalType === 'monthly') {
+                              today.setMonth(today.getMonth() + periodsNeeded);
+                            } else if (task.progressTracking.intervalType === 'yearly') {
+                              today.setFullYear(today.getFullYear() + periodsNeeded);
+                            }
+                            return ` (🎯 ${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
+                          })()}
                         </span>
                       )}
                     </div>
@@ -1667,14 +1684,18 @@ function App() {
                           className="progress-increment-btn"
                           onClick={() => {
                             const newVal = Math.min(
-                              task.progressTracking.current + 10,
+                              task.progressTracking.current + task.progressTracking.unitInterval,
                               task.progressTracking.target
                             );
                             updateTaskProgress(task._id, newVal);
                           }}
+                          title={`Complete today's goal (+${task.progressTracking.unitInterval} ${task.progressTracking.unit})`}
                         >
-                          +10 {task.progressTracking.unit}
+                          ✅ +{task.progressTracking.unitInterval} {task.progressTracking.unit}
                         </button>
+                        <span className="progress-goal-info" style={{ fontSize: '11px', marginLeft: '8px', opacity: 0.7 }}>
+                          {Math.ceil((task.progressTracking.target - task.progressTracking.current) / task.progressTracking.unitInterval)} {task.progressTracking.intervalType === 'daily' ? 'days' : task.progressTracking.intervalType === 'weekly' ? 'weeks' : task.progressTracking.intervalType === 'monthly' ? 'months' : 'years'} remaining
+                        </span>
                       </div>
                     )}
                   </div>
@@ -1992,12 +2013,13 @@ function App() {
             <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>
           </button>
           <div className="user-profile" onClick={() => handleNavClick('profile')}>
-            <div className="user-avatar">
+            <div className="user-avatar" key={user.profilePicture || 'no-pic'}>
               {user.profilePicture ? (
                 <img
                   src={user.profilePicture}
                   alt={user.username}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  key={user.profilePicture}
                 />
               ) : (
                 user.username.charAt(0).toUpperCase()
@@ -2194,9 +2216,10 @@ function App() {
                       type="button"
                       className={`task-type-btn ${newTaskType === 'progress' ? 'active' : ''}`}
                       onClick={() => setNewTaskType('progress')}
+                      title="Create a goal-based task with daily/weekly/monthly targets"
                     >
                       <Target size={18} />
-                      Track Progress
+                      Goal-Based
                     </button>
                   </div>
                 </div>
@@ -2332,9 +2355,39 @@ function App() {
                       />
                     </div>
 
-                    <span className="form-hint">
-                      Goal: Read {newTaskProgressUnitInterval} {newTaskProgressUnit} {newTaskProgressIntervalType} to earn {newTaskProgressXPPerUnit} XP per goal completion
-                    </span>
+                    <div className="progress-goal-summary">
+                      <div className="form-hint">
+                        📊 <strong>Goal Summary:</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • Final Goal: <strong>{newTaskProgressTarget} {newTaskProgressUnit}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • {newTaskProgressIntervalType.charAt(0).toUpperCase() + newTaskProgressIntervalType.slice(1)} Target: <strong>{newTaskProgressUnitInterval} {newTaskProgressUnit}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • Estimated Time: <strong>{Math.ceil(newTaskProgressTarget / newTaskProgressUnitInterval)} {newTaskProgressIntervalType === 'daily' ? 'days' : newTaskProgressIntervalType === 'weekly' ? 'weeks' : newTaskProgressIntervalType === 'monthly' ? 'months' : 'years'}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • XP per period: <strong>{newTaskProgressXPPerUnit} XP</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px', color: 'var(--primary)' }}>
+                        🎯 Completion Date: <strong>{(() => {
+                          const periods = Math.ceil(newTaskProgressTarget / newTaskProgressUnitInterval);
+                          const today = new Date();
+                          if (newTaskProgressIntervalType === 'daily') {
+                            today.setDate(today.getDate() + periods);
+                          } else if (newTaskProgressIntervalType === 'weekly') {
+                            today.setDate(today.getDate() + (periods * 7));
+                          } else if (newTaskProgressIntervalType === 'monthly') {
+                            today.setMonth(today.getMonth() + periods);
+                          } else if (newTaskProgressIntervalType === 'yearly') {
+                            today.setFullYear(today.getFullYear() + periods);
+                          }
+                          return today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        })()}</strong>
+                      </div>
+                    </div>
                   </>
                 ) : (
                   <div className="form-group">
@@ -2599,28 +2652,11 @@ function App() {
 
                     <div className="form-row">
                       <div className="form-group">
-                        <label className="form-label">XP Amount</label>
+                        <label className="form-label">Goal Amount</label>
                         <input
                           type="number"
                           className="form-input"
-                          placeholder="XP per interval"
-                          value={editingTask.progressTracking?.xpPerUnit || 1}
-                          onChange={(e) => setEditingTask({
-                            ...editingTask,
-                            progressTracking: {
-                              ...editingTask.progressTracking,
-                              xpPerUnit: parseInt(e.target.value) || 1
-                            }
-                          })}
-                          min="1"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">Per N Units</label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          placeholder="Unit interval"
+                          placeholder="e.g., 10"
                           value={editingTask.progressTracking?.unitInterval || 10}
                           onChange={(e) => setEditingTask({
                             ...editingTask,
@@ -2632,10 +2668,88 @@ function App() {
                           min="1"
                         />
                       </div>
+                      <div className="form-group">
+                        <label className="form-label">Per Period</label>
+                        <select
+                          className="form-input"
+                          value={editingTask.progressTracking?.intervalType || 'daily'}
+                          onChange={(e) => setEditingTask({
+                            ...editingTask,
+                            progressTracking: {
+                              ...editingTask.progressTracking,
+                              intervalType: e.target.value
+                            }
+                          })}
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="yearly">Yearly</option>
+                        </select>
+                      </div>
                     </div>
-                    <span className="form-hint">
-                      Earn {editingTask.progressTracking?.xpPerUnit || 1} XP for every {editingTask.progressTracking?.unitInterval || 10} {editingTask.progressTracking?.unit || 'units'} completed
-                    </span>
+
+                    <div className="form-group">
+                      <label className="form-label">XP Reward</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        placeholder="e.g., 25"
+                        value={editingTask.progressTracking?.xpPerUnit || 1}
+                        onChange={(e) => setEditingTask({
+                          ...editingTask,
+                          progressTracking: {
+                            ...editingTask.progressTracking,
+                            xpPerUnit: parseInt(e.target.value) || 1
+                          }
+                        })}
+                        min="1"
+                      />
+                    </div>
+
+                    <div className="progress-goal-summary">
+                      <div className="form-hint">
+                        📊 <strong>Goal Summary:</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • Final Goal: <strong>{editingTask.progressTracking?.target || 100} {editingTask.progressTracking?.unit || 'units'}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • {(editingTask.progressTracking?.intervalType || 'daily').charAt(0).toUpperCase() + (editingTask.progressTracking?.intervalType || 'daily').slice(1)} Target: <strong>{editingTask.progressTracking?.unitInterval || 10} {editingTask.progressTracking?.unit || 'units'}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • Remaining: <strong>{Math.max(0, (editingTask.progressTracking?.target || 100) - (editingTask.progressTracking?.current || 0))} {editingTask.progressTracking?.unit || 'units'}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • Time Left: <strong>{(() => {
+                          const remaining = Math.max(0, (editingTask.progressTracking?.target || 100) - (editingTask.progressTracking?.current || 0));
+                          const periods = Math.ceil(remaining / (editingTask.progressTracking?.unitInterval || 10));
+                          const intervalType = editingTask.progressTracking?.intervalType || 'daily';
+                          return `${periods} ${intervalType === 'daily' ? 'days' : intervalType === 'weekly' ? 'weeks' : intervalType === 'monthly' ? 'months' : 'years'}`;
+                        })()}</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px' }}>
+                        • XP per period: <strong>{editingTask.progressTracking?.xpPerUnit || 1} XP</strong>
+                      </div>
+                      <div className="form-hint" style={{ marginLeft: '20px', color: 'var(--primary)' }}>
+                        🎯 Completion Date: <strong>{(() => {
+                          const remaining = Math.max(0, (editingTask.progressTracking?.target || 100) - (editingTask.progressTracking?.current || 0));
+                          const periods = Math.ceil(remaining / (editingTask.progressTracking?.unitInterval || 10));
+                          const today = new Date();
+                          const intervalType = editingTask.progressTracking?.intervalType || 'daily';
+                          if (intervalType === 'daily') {
+                            today.setDate(today.getDate() + periods);
+                          } else if (intervalType === 'weekly') {
+                            today.setDate(today.getDate() + (periods * 7));
+                          } else if (intervalType === 'monthly') {
+                            today.setMonth(today.getMonth() + periods);
+                          } else if (intervalType === 'yearly') {
+                            today.setFullYear(today.getFullYear() + periods);
+                          }
+                          return today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        })()}</strong>
+                      </div>
+                    </div>
                   </>
                 ) : (
                   <div className="form-group">
